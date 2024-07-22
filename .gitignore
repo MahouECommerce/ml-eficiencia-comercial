@@ -1,0 +1,5 @@
+config.ini
+test/__pycache__/*
+__pycache__/
+*.py[cod]
+__playground.py
