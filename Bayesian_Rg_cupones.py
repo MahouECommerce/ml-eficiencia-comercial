@@ -53,6 +53,7 @@ order_detail_sorted = create_lagged_variables(
     order_detail_sorted, 'CouponDiscountPct',
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ['NameDistributor', 'Name'])
 order_detail_sorted.to_csv("data/digitalizacion.csv", sep=";")
+    
 
 def get_index(df, starts_with):
     return df[[c for c in df.columns if c.startswith(starts_with)]] \
@@ -85,6 +86,22 @@ df=pd.get_dummies(df, columns=['season'], prefix='season')
 
 # MAGIC ### Filtro Sellout < 3000
 df['Sellout'].describe()
+
+coupon_cols = [c for c in order_detail_sorted.columns if c.startswith("CouponDiscountAmt")]
+coupon_poly_cols = ['CouponDiscountAmt^2'] + list(it.dropwhile(lambda x: not x.endswith("POLY_2"), coupon_cols))
+coupon_cols = list(set(coupon_cols) - set(coupon_poly_cols))
+
+order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 0].CouponDiscountAmt.describe()
+coupon_cutoff = 70
+def filter_lags(df, coupon_cutoff):
+    for col in coupon_cols:
+        df[col] = np.where(df[col] <= coupon_cutoff, df[col], 0)
+    for col in coupon_poly_cols:
+        df[col] = np.where(df[col] <= (coupon_cutoff ** 2), df[col], 0)
+    return df
+
+df = df[df["CouponDiscountAmt"] <= coupon_cutoff]
+df = filter_lags(df, coupon_cutoff)
 
 # df=df[df['year']==2023]
 # df=df[df['Sellout']]
@@ -225,7 +242,8 @@ df['Sellout'].sum()
 ardr.coef_[start_index:end_index]
 model_no_weight.coef_[start_index:end_index]
 np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
-                                               (df.CouponDiscountAmt < 100)],
+                                               (df.CouponDiscountAmt < 100)
+                                               ],
        model_no_weight.coef_[start_index:end_index]).sum()
 np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
                                                (df.CouponDiscountAmt < 10)],
@@ -269,7 +287,7 @@ def make_plot(model_name, results_por_nivel, labels, y_label):
     plt.xlabel('Euros')
     plt.ylabel(y_label)
     plt.grid(True)
-    plt.savefig(f"plots/{plot_name}.png")
+    plt.savefig(f"plots/{plot_name}.jpg")
     plt.close()
     
 def make_simulations(model_name, model, levels, y_label="Retornos"):
@@ -287,21 +305,21 @@ def make_simulations(model_name, model, levels, y_label="Retornos"):
         r = np.dot(matrix, coef_cupones).sum()
         results.append((euros, r))
 
-        results_por_nivel = []
+    results_por_nivel = []
 
-        # Iterar sobre las matrices generadas
-        for matrix in data:
-            resultados_nivel = []
-            for _ in range(1000):
-                c2 = np.random.normal(coef_cupones, np.sqrt(sigma_cupones))
-                r = np.dot(matrix, c2).sum()
-                resultados_nivel.append(r)
-            results_por_nivel.append(resultados_nivel)
+    # Iterar sobre las matrices generadas
+    for matrix in data:
+        resultados_nivel = []
+        for _ in range(1000):
+            c2 = np.random.normal(coef_cupones, np.sqrt(sigma_cupones))
+            r = np.dot(matrix, c2).sum()
+            resultados_nivel.append(r)
+        results_por_nivel.append(resultados_nivel)
 
-        labels = [i for i in [1] + [k for k in range(2, levels, 2)]]
-        make_plot(model_name, results_por_nivel, labels, y_label)
-make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2, "Digitalizacion")
-make_simulations("Modelo General", model_no_weight, 52)
+    labels = [i for i in [1] + [k for k in range(2, levels, 2)]]
+    make_plot(model_name, results_por_nivel, labels, y_label)
+# make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2, "Digitalizacion")
+make_simulations("Modelo General", model_no_weight, 72)
 
 indices = {"fixed": fixed_model_index, "pct": pct_model_index}
 for k in indices:
