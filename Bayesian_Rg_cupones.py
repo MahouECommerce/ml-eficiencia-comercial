@@ -53,15 +53,59 @@ order_detail_sorted = create_lagged_variables(
     order_detail_sorted, 'CouponDiscountPct',
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ['NameDistributor', 'Name'])
 order_detail_sorted.to_csv("data/digitalizacion.csv", sep=";")
-    
 
 def get_index(df, starts_with):
     return df[[c for c in df.columns if c.startswith(starts_with)]] \
         .apply(lambda x: x.sum() > 0, axis=1)
+order_detail_sorted[["Coupon_type", "CouponDescription"]].groupby("Coupon_type").count()
 coupon_index = get_index(order_detail_sorted, 'CouponDiscountAmt')
+pdvs_with_coupon = order_detail_sorted[coupon_index].PointOfSaleId.unique()
+len(pdvs_with_coupon)
+len(order_detail_sorted.PointOfSaleId.unique())
+
+order_detail_sorted.columns
+
+descriptive = []
+for pdv in pdvs_with_coupon:
+    data = order_detail_sorted[coupon_index & (order_detail_sorted.PointOfSaleId == pdv)]
+    first_coupon = data.OrderDate.min()
+    before = order_detail_sorted[(order_detail_sorted.OrderDate < first_coupon) &
+                                 (order_detail_sorted.PointOfSaleId == pdv)]
+    after = order_detail_sorted[(order_detail_sorted.OrderDate >= first_coupon) &
+                                (order_detail_sorted.PointOfSaleId == pdv)]
+    if before.shape[0] and after.shape[0]:
+        results = {"pdv": pdv,
+                   "before_digitalizacion": before.Digitalizacion.mean(),
+                   "before_pedidos_online": before.Online.sum(),
+                   "before_pedidos": before.Online.count(),
+                   "before_online_ratio":
+                   before.Online.sum() if before.Online.sum() == 0 else before.Online.sum() / before.Online.count(),
+                   "before_sellout": before.Sellout.mean(),
+                   "before_coupon": before.CouponDiscountAmt.mean(),                   
+                   "after_digitalizacion": after.Digitalizacion.mean(),
+                   "after_pedidos_online": after.Online.sum(),
+                   "after_pedidos": after.Online.count(),
+                   "after_online_ratio":
+                   after.Online.sum() if after.Online.sum() == 0 else after.Online.sum() / after.Online.count(),
+                   "after_sellout": after.Sellout.mean(),
+                   "after_coupon": after.CouponDiscountAmt.mean(),
+                   "had_offline": before.Online.sum() < before.Online.count()}
+        descriptive.append(results)
+        if (before.Online.sum() < before.Online.count()) and (
+                before.Digitalizacion.mean() < after.Digitalizacion.mean()):
+            print(results)
+            print("-"*100)
+
+descriptive = pd.DataFrame(descriptive)
+descriptive[descriptive.had_offline]
+order_detail_sorted[
+    order_detail_sorted.PointOfSaleId=="CLI0042747CLI0050757"][["Digitalizacion", "Online", "CouponDiscountAmt"]]
+
 pct_index = get_index(order_detail_sorted, 'CouponDiscountPct')
 fixed_index = pd.concat([coupon_index, pct_index], axis=1) \
                 .apply(lambda x: x[0] and not x[1], axis=1)
+pct_index.sum()
+fixed_index.sum()
 no_coupon_index = coupon_index.apply(lambda x: not x)
 fixed_model_index = pd.concat([no_coupon_index, fixed_index], axis=1) \
                       .apply(lambda x: x[0] or x[1], axis=1)
@@ -92,7 +136,8 @@ coupon_poly_cols = ['CouponDiscountAmt^2'] + list(it.dropwhile(lambda x: not x.e
 coupon_cols = list(set(coupon_cols) - set(coupon_poly_cols))
 
 order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 0].CouponDiscountAmt.describe()
-coupon_cutoff = 70
+order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 100].CouponDiscountAmt.describe()
+coupon_cutoff = 96
 def filter_lags(df, coupon_cutoff):
     for col in coupon_cols:
         df[col] = np.where(df[col] <= coupon_cutoff, df[col], 0)
@@ -102,6 +147,7 @@ def filter_lags(df, coupon_cutoff):
 
 df = df[df["CouponDiscountAmt"] <= coupon_cutoff]
 df = filter_lags(df, coupon_cutoff)
+df.to_csv("filtered.csv", sep=";")
 
 # df=df[df['year']==2023]
 # df=df[df['Sellout']]
@@ -228,28 +274,70 @@ model_no_weight.coef_[start_index:end_index]
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)
 ardr.coef_[start_index:end_index]
-modelo_digitalizacion = ARDRegression(fit_intercept=False)
-modelo_digitalizacion.fit(features, target_digitalizacion)
-modelo_digitalizacion.coef_[start_index:end_index]
+modelo_digitalizacion = BayesianRidge()
+modelo_digitalizacion.fit(features.iloc[:, start_index:end_index], target_digitalizacion)
+modelo_digitalizacion.coef_
+np.diag(modelo_digitalizacion.sigma_)
 np.diag(modelo_digitalizacion.sigma_)[start_index:end_index]
+nb = GaussianNB()
+nb.fit(features.iloc[:, start_index:end_index], target_online)
+online_predict = nb.predict(features.iloc[:, start_index:end_index])
+target_online
+online_predict
+df[target_online & np.vectorize(lambda x: not x)(online_predict)].CouponDiscountAmt
+online_predict
 
-# nb = GaussianNB()
-# nb.fit(features.iloc[:, start_index:end_index], target_online)
-# nb.predict(features.iloc[:, start_index:end_index]).sum()
-# model_no_weight.coef_[start_index:end_index]
-
-df['Sellout'].sum()
+model_no_weight.coef_[start_index:end_index]
 ardr.coef_[start_index:end_index]
 model_no_weight.coef_[start_index:end_index]
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
-                                               (df.CouponDiscountAmt < 100)
-                                               ],
-       model_no_weight.coef_[start_index:end_index]).sum()
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
-                                               (df.CouponDiscountAmt < 10)],
-       model_no_weight.coef_[start_index:end_index]).sum()
 
-df[df.year==2023]['CouponDiscountAmt'].sum()
+df['Sellout'].sum()
+investment = df[df.year==2023]['CouponDiscountAmt'].sum()
+print(investment)
+np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
+       model_no_weight.coef_[start_index:end_index],
+       ).sum()
+
+returns = []
+for k in range(600):
+    c = np.random.normal(
+        model_no_weight.coef_[start_index:end_index],
+        np.diag(model_no_weight.sigma_)[start_index:end_index])
+    r = np.dot(features.iloc[:, start_index:end_index][(df.year==2023)], c).sum()
+    returns.append((r - investment) / investment)
+
+plt.hist(returns, bins=30)
+plt.savefig("plots/returns.jpg")
+plt.close()
+model_no_weight.coef_[start_index:end_index]
+coef_cupones_2 = ardr.coef_[start_index:(end_index - 11)]
+plt.bar(range(len(coef_cupones_2)), coef_cupones_2, color='skyblue', edgecolor='black')
+plt.title('Coeficientes del Modelo')
+plt.xlabel('Índice del Coeficiente')
+plt.ylabel('Valor del Coeficiente')
+plt.xticks(range(len(coef_cupones_2)))
+plt.savefig("plots/coeficiente.jpg")
+plt.close()
+
+coef_cupones_2 = model_no_weight.coef_[(start_index + 11):end_index]
+plt.bar(range(len(coef_cupones_2)), coef_cupones_2, color='skyblue', edgecolor='black')
+plt.title('Coeficientes cuadráticos del Modelo')
+plt.xlabel('Índice del Coeficiente')
+plt.ylabel('Valor del Coeficiente')
+plt.xticks(range(len(coef_cupones_2)))
+plt.savefig("plots/coeficiente_2.jpg")
+plt.close()
+
+
+    
+np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
+       model_no_weight.coef_[start_index:end_index]).sum()
+np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
+                                               (df.CouponDiscountAmt < 20)],
+       model_no_weight.coef_[start_index:end_index]).sum()
+np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
+                                               (df.CouponDiscountAmt >= 20)],
+       model_no_weight.coef_[start_index:end_index]).sum()
 
 def fit_model(features, target, target_digitalizacion):
     model = BayesianRidge(fit_intercept=False)
@@ -282,6 +370,7 @@ def make_probability_plot(model_name, model):
 
 def make_plot(model_name, results_por_nivel, labels, y_label):
     plot_name = model_name.replace(" ", "_").lower()
+    plt.figure().set_figwidth(10)    
     plt.boxplot(results_por_nivel, labels=labels)
     plt.title(f'Simulaciones: {model_name}')
     plt.xlabel('Euros')
@@ -290,36 +379,49 @@ def make_plot(model_name, results_por_nivel, labels, y_label):
     plt.savefig(f"plots/{plot_name}.jpg")
     plt.close()
     
-def make_simulations(model_name, model, levels, y_label="Retornos"):
-    start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")    
-    coef_cupones = model.coef_[start_index:end_index]
+def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, digi=False):
+    start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")
+    if not digi:
+        coef_cupones = model.coef_[start_index:end_index]
+    else:
+        coef_cupones = model.coef_
+    
     sigma_cupones = np.diag(model_no_weight.sigma_)[start_index:end_index]
 
     data = [generate_data_for_simulation(11, cl, 2)
             for cl in range(1, levels, 2)]
-    results = []
-    # Iterar sobre las matrices generadas
-    for i, matrix in enumerate(data, start=1):
-        euros = i
-        # Calcular el producto punto y la suma para cada matriz generada
-        r = np.dot(matrix, coef_cupones).sum()
-        results.append((euros, r))
 
     results_por_nivel = []
-
     # Iterar sobre las matrices generadas
     for matrix in data:
         resultados_nivel = []
         for _ in range(1000):
             c2 = np.random.normal(coef_cupones, np.sqrt(sigma_cupones))
-            r = np.dot(matrix, c2).sum()
+            r = np.dot(matrix, c2).sum() - matrix[0,0]
             resultados_nivel.append(r)
         results_por_nivel.append(resultados_nivel)
 
     labels = [i for i in [1] + [k for k in range(2, levels, 2)]]
     make_plot(model_name, results_por_nivel, labels, y_label)
-# make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2, "Digitalizacion")
-make_simulations("Modelo General", model_no_weight, 72)
+
+    if diffs:
+        results_por_diff = []
+        # Iterar sobre las matrices generadas
+        for k in range(1, len(data)):
+            resultados_diff = []
+            for _ in range(1000):
+                c2 = np.random.normal(coef_cupones, np.sqrt(sigma_cupones))
+                r = (np.dot(data[k], c2) - np.dot(data[k - 1], c2)).sum()
+                resultados_diff.append(r)
+            results_por_diff.append(resultados_diff)
+
+        labels = [i for i in [k for k in range(2, levels, 2)]]
+        make_plot(f"{model_name} diffs", results_por_diff, labels, y_label)
+    
+    
+make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2, "Digitalizacion", False, True)
+make_simulations("Modelo General", model_no_weight, coupon_cutoff + 2)
+make_probability_plot("Modelo probabilidad digitalizacion", nb)
 
 indices = {"fixed": fixed_model_index, "pct": pct_model_index}
 for k in indices:
@@ -327,8 +429,8 @@ for k in indices:
     t = target[indices[k]]
     td = target_digitalizacion[indices[k]]
     br, ardr, md = fit_model(f, t, td)
-    make_simulations(f"Modelo digitalizacion {k}", md, 2, "Digitalizacion")
-    make_simulations(f"Modelo general {k}", br, 52)
+    make_simulations(f"Modelo digitalizacion {k}", md, 2, "Digitalizacion", False)
+    make_simulations(f"Modelo general {k}", br, coupon_cutoff + 2)
     
 
 years = [2023, 2024]
