@@ -11,6 +11,7 @@ import asyncio
 import itertools as it
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+import pickle
 # import numpy as np
 
 # config = iou.read_config()
@@ -322,6 +323,10 @@ for pdv in pdvs:
     # Agregar el diccionario a la lista de modelos
     modelos_pdv.append(modelo_info)
 
+# Guardar la lista de diccionarios
+with open('submodelos_pdv.pkl', 'wb') as file:
+    pickle.dump(modelos_pdv, file)
+    
 ## DF con coeficientes de variables CPDiscountAmt y ^2 por pdv
 features_interesantes = ['CouponDiscountAmt', 'CouponDiscountAmt^2']
 indices_interes = [x_pdv.columns.get_loc(var) for var in features_interesantes]
@@ -368,6 +373,15 @@ df_pca=df_pca.sort_values(by='PC1', ascending=False)
 tops_pdvs= df_pca.head()
 bottom_pdvs=df_pca.tail()
 
+
+#Merge con nuestro df
+df_merged = pd.merge(df, df_pca[['pdv', 'PC1']], left_on='PointOfSaleId', right_on='pdv', how='left')
+# Cuartiles basados en PC1
+df_merged=df_merged.sort_values(by='PC1', ascending=False)
+df_merged['Cuartil'] = pd.qcut(df_merged['PC1'], q=4, labels=['75-100%', '50-75%', '25-50%', 'Top 25%'])
+
+# Sellout medio por cuartil
+sellout_por_cuartil = df_merged.groupby('Cuartil')['Sellout'].mean()
 
 
 
