@@ -13,6 +13,9 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import pickle
 # import numpy as np
+from features_list import feat_cols
+import warnings
+warnings.filterwarnings("ignore")
 
 # config = iou.read_config()
 # container_name = pipeline.flow(
@@ -184,70 +187,8 @@ df.to_csv("filtered.csv", sep=";")
 # df['CouponDiscountAmt'].sum()
 
 # MAGIC ####Selección de columnas para el modelo
-feat_cols = [
-    'season_Otoño',
-    'season_Primavera',
-    'season_Verano',
-    'DayCount',
-    'DayCount^2',
-    'Tip_Bar Tradicional',
-    'Tip_Cervecería',
-    'Tip_Discoteca',
-    'Tip_Establecimiento de Tapeo',
-    'Tip_No Segmentado',
-    'Tip_Noche Temprana',
-    'Tip_Pastelería/Cafetería/Panadería',
-    'Tip_Restaurante',
-    'Tip_Restaurante de Imagen',
-    'Tip_Restaurante de Imagen con Tapeo',
-    'Orig_OFFLINE',
-    'Type_Porcentual',
-    'CouponDiscountAmt',
-    'CouponDiscountAmt_LAG_1',
-    'CouponDiscountAmt_LAG_2',
-    'CouponDiscountAmt_LAG_3',
-    'CouponDiscountAmt_LAG_4',
-    'CouponDiscountAmt_LAG_5',
-    # 'CouponDiscountAmt_LAG_6',
-    # 'CouponDiscountAmt_LAG_7',
-    # 'CouponDiscountAmt_LAG_8',
-    # 'CouponDiscountAmt_LAG_9',
-    # 'CouponDiscountAmt_LAG_10',
-    'CouponDiscountAmt^2',
-    'CouponDiscountAmt_LAG_1_POLY_2',
-    'CouponDiscountAmt_LAG_2_POLY_2',
-    'CouponDiscountAmt_LAG_3_POLY_2',
-    'CouponDiscountAmt_LAG_4_POLY_2',
-    'CouponDiscountAmt_LAG_5_POLY_2',
-    # 'CouponDiscountAmt_LAG_6_POLY_2',
-    # 'CouponDiscountAmt_LAG_7_POLY_2',
-    # 'CouponDiscountAmt_LAG_8_POLY_2',
-    # 'CouponDiscountAmt_LAG_9_POLY_2',
-    # 'CouponDiscountAmt_LAG_10_POLY_2',
-    'Sellout_LAG_1',
-    'Sellout_LAG_2',
-    'Sellout_LAG_3',
-    'Sellout_LAG_4',
-    'Sellout_LAG_5',
-    # 'Sellout_LAG_6',
-    # 'Sellout_LAG_7',
-    # 'Sellout_LAG_8',
-    # 'Sellout_LAG_9',
-    # 'Sellout_LAG_10',
-    'Sellout_LAG_1_POLY_2',
-    'Sellout_LAG_2_POLY_2',
-    'Sellout_LAG_3_POLY_2',
-    'Sellout_LAG_4_POLY_2',
-    'Sellout_LAG_5_POLY_2', 
-    # 'Sellout_LAG_6_POLY_2', 
-    # 'Sellout_LAG_7_POLY_2',
-    # 'Sellout_LAG_8_POLY_2', 
-    # 'Sellout_LAG_9_POLY_2', 
-    # 'Sellout_LAG_10_POLY_2',
-]
-
-target_col = 'Sellout'
-features = df[feat_cols]
+target_col='Sellout'
+features=df[feat_cols]
 target = df[target_col]
 target_IsOnline = df.ForwardIsOnline
 target_digitalizacion = df.Digitalizacion
@@ -291,30 +232,35 @@ sample_weight = np.where(feature_balance == 0,
                          weight_no_coupon,
                          weight_with_coupon)
 
-# FIT modelo CON PESOS
-model_with_weight = BayesianRidge(fit_intercept=False)
-model_with_weight.fit(features, target, sample_weight=sample_weight)
-coef_with_weight = model_with_weight.coef_
+#FIT MODELO SIN PESOS
+model_no_weight = BayesianRidge(fit_intercept=False)
 
-general_predictions = model_with_weight.predict(features)
+model_no_weight.fit(features, target)
+model_no_weight.coef_[start_index:end_index]
+model_no_weight.coef_[start_index:(start_index+6)].sum()
+
+general_predictions = model_no_weight.predict(features)
 
 
-# SUBMODELO PARA UN PDV
+# # SUBMODELO PARA UN PDV
 
 pdvs = df['PointOfSaleId'].unique()  
 #lista para los modos_pdvs
 modelos_pdv = []
 
 for pdv in pdvs:
-    df_pdv=df[df['PointOfSaleId']== pdv]
+    df_pdv=df[df['PointOfSaleId']== pdv].reset_index(drop=True, inplace=False)
     x_pdv=df_pdv[feat_cols]
     y_pdv=df_pdv[target_col]
 
-    y_pred_general_pdv=model_with_weight.predict(x_pdv)
-    modelo_pdv= BayesianRidge()
-    modelo_pdv.fit(x_pdv, y_pdv)
-    
+    y_pred_general_pdv=model_no_weight.predict(x_pdv)
+    modelo_pdv = BayesianRidge()
+    x_to_train = pd.concat([x_pdv,x_pdv])
+    y_to_train = pd.concat([y_pdv,pd.DataFrame({"Sellout": y_pred_general_pdv})],axis=0)
 
+
+    modelo_pdv.fit(x_to_train, y_to_train) 
+    
     modelo_info = {
         'pdv': pdv,
         'modelo': modelo_pdv
@@ -327,8 +273,20 @@ for pdv in pdvs:
 with open('submodelos_pdv.pkl', 'wb') as file:
     pickle.dump(modelos_pdv, file)
     
-## DF con coeficientes de variables CPDiscountAmt y ^2 por pdv
-features_interesantes = ['CouponDiscountAmt', 'CouponDiscountAmt^2']
+## DF con coeficientes de variables CPDiscountAmt y ^2 por pdv y lags
+features_interesantes = ['CouponDiscountAmt',
+    'CouponDiscountAmt_LAG_1',
+    'CouponDiscountAmt_LAG_2',
+    'CouponDiscountAmt_LAG_3',
+    'CouponDiscountAmt_LAG_4',
+    'CouponDiscountAmt_LAG_5',
+    'CouponDiscountAmt^2',
+    'CouponDiscountAmt_LAG_1_POLY_2',
+    'CouponDiscountAmt_LAG_2_POLY_2',
+    'CouponDiscountAmt_LAG_3_POLY_2',
+    'CouponDiscountAmt_LAG_4_POLY_2',
+    'CouponDiscountAmt_LAG_5_POLY_2',] 
+
 indices_interes = [x_pdv.columns.get_loc(var) for var in features_interesantes]
 
 df_coeficientes = pd.DataFrame(columns=['pdv'] + features_interesantes)
@@ -357,7 +315,7 @@ scaler = StandardScaler()
 data_scaled = scaler.fit_transform(data_for_pca)
 
 # Aplicar PCA
-pca = PCA(n_components=2)  # Cambia n_components según lo que necesites
+pca = PCA(n_components=2)  
 pca_result = pca.fit_transform(data_scaled)
 
 # Crear un DataFrame con los resultados de PCA
@@ -366,7 +324,7 @@ df_pca = pd.DataFrame(data=pca_result, columns=['PC1', 'PC2'])
 # Agregar la columna de pdv para referencia
 df_pca['pdv'] = df_coeficientes['pdv'].values
 
-# df_pca.to_csv('pca_pdvs_coeficientes.csv', index=False)
+df_pca.to_csv('pca_pdvs_coeficientes.csv', index=False)
 
 df_pca=df_pca.sort_values(by='PC1', ascending=False)
 
@@ -386,15 +344,8 @@ sellout_por_cuartil = df_merged.groupby('Cuartil')['Sellout'].mean()
 
 
 
-
+print('fin')
 # MAGIC ####Aplicación del modelo y entrenamiento
-#FIT MODELO SIN PESOS
-model_no_weight = BayesianRidge(fit_intercept=False)
-
-model_no_weight.fit(features, target)
-model_no_weight.coef_[start_index:end_index]
-model_no_weight.coef_[start_index:(start_index+6)].sum()
-
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)
 ardr.coef_[start_index:end_index]
@@ -426,11 +377,11 @@ np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
        ).sum()
 
 returns = []
-for k in range(600):
+for k in range(600):    
     c = np.random.normal(
         model_no_weight.coef_[start_index:end_index],
         np.diag(model_no_weight.sigma_)[start_index:end_index])
-    r = np.dot(features.iloc[:, start_index:end_index][(df.year==2023)], c).sum()
+    r = np.dot(features.iloc[:, start_index:end_index][(df.year==2023)], c).sum()  
     returns.append((r - investment) / investment)
 
 plt.hist(returns, bins=30, density=True,
@@ -439,8 +390,8 @@ plt.hist(returns, bins=30, density=True,
 plt.title("Retorno de la inversión en cupones")
 plt.xlabel("Retorno porcentual")
 plt.ylabel("Frequencia")
-plt.savefig("plots/returns.jpg")
-plt.close()
+# plt.savefig("plots/returns.jpg")
+plt.show()
 
 coef_cupones_2 = model_no_weight.coef_[start_index:(start_index + 6)]
 coef_cupones_2
@@ -455,8 +406,8 @@ def plot_coefs(coefs, model_name):
     plt.xlabel('Índice del Coeficiente')
     plt.ylabel('Valor del Coeficiente')
     plt.xticks(range(len(coef_cupones_2)))
-    plt.savefig(f"plots/coeficiente_{model_name}.jpg")
-    plt.close()
+    # plt.savefig(f"plots/coeficiente_{model_name}.jpg")
+    plt.show()
 
 
 plot_coefs(coef_cupones_2, "modelo_general")
@@ -467,7 +418,7 @@ plt.title('Coeficientes cuadráticos del Modelo')
 plt.xlabel('Índice del Coeficiente')
 plt.ylabel('Valor del Coeficiente')
 plt.xticks(range(len(coef_cupones_2)))
-plt.savefig("plots/coeficiente_2.jpg")
+# plt.savefig("plots/coeficiente_2.jpg")
 plt.close()
 
     
@@ -509,9 +460,8 @@ def make_probability_plot(model_name, model):
     plt.xlabel('Euros')
     plt.ylabel('Log-probabilidad')
     plot_name = model_name.replace(" ", "_").lower()
-    plt.savefig(f"plots/log_proba_{plot_name}.png")
-    plt.close()
-
+    # plt.savefig(f"plots/log_proba_{plot_name}.png")
+    plt.show()
     
 def make_plot(model_name, results_por_nivel, labels, y_label):
     plot_name = model_name.replace(" ", "_").lower()
@@ -521,8 +471,8 @@ def make_plot(model_name, results_por_nivel, labels, y_label):
     plt.xlabel('Euros')
     plt.ylabel(y_label)
     plt.grid(True)
-    plt.savefig(f"plots/{plot_name}.jpg")
-    plt.close()
+    # plt.savefig(f"plots/{plot_name}.jpg")
+    plt.show()
 
 
 def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, digi=False):

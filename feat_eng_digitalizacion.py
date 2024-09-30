@@ -8,7 +8,7 @@ import numpy as np
 maestro_cliente_path = r'C:\Users\ctrujils\Downloads\maestro_cliente_final_12UM.parquet'
 maestro_clientes = pd.read_parquet(maestro_cliente_path)
 
-path = r'C:\Users\ctrujils\Downloads\order_detail.parquet'
+path = r'C:\Users\ctrujils\Downloads\order_detail_total.parquet'
 order_detail = pd.read_parquet(path)
 
 
@@ -47,17 +47,6 @@ order_detail_sorted = order_detail_sorted.rename(columns={'TotalOrderPrice': 'Se
 pedidos_con_cupon = order_detail_sorted[order_detail_sorted['CouponDescription'] != 'NoCupon']['PointOfSaleId'].value_counts()
 pedidos_sin_cupon = order_detail_sorted[order_detail_sorted['CouponDescription'] == 'NoCupon']['PointOfSaleId'].value_counts()
 
-# # Análisis de datos
-# order_detail_sorted_filtered_con_cupon = order_detail_sorted[
-#     (order_detail_sorted['CouponDiscountAmt'] > 0) | (order_detail_sorted['CouponDiscountPct'] > 0)]
-# pdvs_con_cupon = order_detail_sorted_filtered_con_cupon['PointOfSaleId'].unique()
-
-# order_detail_sorted_filtered_sin_cupon = order_detail_sorted[
-#     (order_detail_sorted['CouponDiscountAmt'] == 0.0) & (order_detail_sorted['CouponDiscountPct'] == 0.0)]
-# pdvs_sin_cupon = order_detail_sorted_filtered_sin_cupon['PointOfSaleId'].unique()
-
-# duplicados_entre_grupos = set(pdvs_con_cupon).intersection(set(pdvs_sin_cupon))
-# pdvs_nunca_cupon = set(pdvs_sin_cupon) - set(pdvs_con_cupon)
 
 
 # Datos online
@@ -98,6 +87,17 @@ order_detail_sorted = pd.concat([a, pedidos_online], axis=0)
 order_detail_sorted['OrderDate'] = pd.to_datetime(order_detail_sorted['OrderDate'])
 order_detail_sorted.dropna(subset=['Code', 'CodeProduct', 'Origin'], inplace=True)
 
+# Análisis de datos
+order_detail_sorted_filtered_con_cupon = order_detail_sorted[
+    (order_detail_sorted['CouponDiscountAmt'] > 0) | (order_detail_sorted['CouponDiscountPct'] > 0)]
+pdvs_con_cupon = order_detail_sorted_filtered_con_cupon['PointOfSaleId'].unique()
+
+order_detail_sorted_filtered_sin_cupon = order_detail_sorted[
+    (order_detail_sorted['CouponDiscountAmt'] == 0.0) & (order_detail_sorted['CouponDiscountPct'] == 0.0)]
+pdvs_sin_cupon = order_detail_sorted_filtered_sin_cupon['PointOfSaleId'].unique()
+
+duplicados_entre_grupos = set(pdvs_con_cupon).intersection(set(pdvs_sin_cupon))
+pdvs_nunca_cupon = set(pdvs_sin_cupon) - set(pdvs_con_cupon)
 
 # Analizar frecuencia de compra online
 
@@ -129,6 +129,8 @@ def clasificar_descuento(row):
     return 'NoCupon'
 
 order_detail_sorted['Coupon_type'] = order_detail_sorted.apply(clasificar_descuento, axis=1)
+
+
 
 
 # Recurrencia a la compra de cupones
@@ -200,7 +202,7 @@ order_detail_sorted = pd.concat(digitalizacion)
 
 
 # # # Guardar archivo final
-save_path = r'C:\Users\ctrujils\order_detail_sorted.parquet'
+save_path = r'C:\Users\ctrujils\order_detail_sorted_v2.parquet'
 order_detail_sorted.to_parquet(save_path, index=False)
 
 print('fin')
