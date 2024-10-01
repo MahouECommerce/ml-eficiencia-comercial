@@ -1,12 +1,43 @@
 # Importar librerías
 import pandas as pd
 import numpy as np
+import pickle
 
 
 
 # Leer datos
 maestro_cliente_path = r'C:\Users\ctrujils\Downloads\maestro_cliente_final_12UM.parquet'
 maestro_clientes = pd.read_parquet(maestro_cliente_path)
+
+
+#### AGREGAMOS CLUSTER 1,2,3,Y 0
+
+with open('cluster_dict_by_company_release_1.pickle', 'rb') as file:
+    segmentacion = pickle.load(file)
+
+data = []
+
+# Iterar sobre cada clave del diccionario (los números como '1', '4', '5', etc.)
+for cluster, sub_dict in segmentacion.items():
+    # Añadir cada PointOfSaleId y su respectivo cluster como tupla (id, cluster)
+    for point_of_sale_id, cluster_value in sub_dict.items():
+        data.append((point_of_sale_id, cluster_value))
+
+# Convertir la lista de tuplas en un DataFrame
+df_cluster = pd.DataFrame(data, columns=['company_id', 'Cluster'])
+
+
+maestro_clientes=pd.merge(maestro_clientes,df_cluster, on='company_id', how='left')
+
+
+
+# # # Guardar archivo final
+save_path = r'C:\Users\ctrujils\maestro_clientes_12UM_cluster.parquet'
+maestro_clientes.to_parquet(save_path, index=False)
+
+
+
+
 
 path = r'C:\Users\ctrujils\Downloads\order_detail_total.parquet'
 order_detail = pd.read_parquet(path)
@@ -22,7 +53,9 @@ order_detail['CouponDiscountPct'] = order_detail['CouponDiscountPct'].replace([N
 order_detail['CouponDescription'] = order_detail['CouponDescription'].replace([None, ''], 'NoCupon')
 order_detail['CouponDiscountAmt'] = pd.to_numeric(order_detail['CouponDiscountAmt'], errors='coerce')
 
-# Seleccionar columnas relevantes
+order_detail['NameDistributor'] = order_detail['NameDistributor'].replace('Voldis A Coruña', 'Voldis Coruña')
+
+
 order_detail_sorted_filtrado_selected = order_detail[['Code', 'DistributorID', 'CodeDistributor', 'Name', 'NameDistributor', 
                                      'PointOfSaleId', 'CodeProduct', 'CouponId', 'CouponCode',
                                      'CouponDescription', 'OrderDate', 'CouponDiscountAmt', 
@@ -66,10 +99,10 @@ def classification_origin(row):
 
 order_detail_sorted['Origin'] = order_detail_sorted.apply(classification_origin, axis=1)
 
-maestro_clientes = maestro_clientes[['tipologia', 'company_id']]
+maestro_clientes = maestro_clientes[['tipologia', 'Cluster' ,'company_id']]
 order_detail_sorted = pd.merge(order_detail_sorted, maestro_clientes, left_on='PointOfSaleId', right_on='company_id', how='left')
 order_detail_sorted.drop(columns='company_id', inplace=True)
-order_detail_sorted.dropna(subset=['tipologia', 'Name'], inplace=True)
+order_detail_sorted['tipologia'] = order_detail_sorted['tipologia'].fillna('No Segmentado')
 
 # Limpieza de datos
 order_detail_sorted = order_detail_sorted[['Code', 'OrderDate', 'Sellout','CodeProduct','Name', 'NameDistributor', 
@@ -78,7 +111,7 @@ order_detail_sorted = order_detail_sorted[['Code', 'OrderDate', 'Sellout','CodeP
 
 order_detail_sorted['NameDistributor'] = order_detail_sorted['NameDistributor'].apply(lambda x: x.replace(' BC', '').title())
 
-pedidos_online = pedidos_online[pedidos_online['NameDistributor'].isin(order_detail_sorted['NameDistributor'].unique())]
+
 
 # Unir y ajustar datos
 a = order_detail_sorted[order_detail_sorted['Origin'] == 'OFFLINE']
@@ -87,17 +120,6 @@ order_detail_sorted = pd.concat([a, pedidos_online], axis=0)
 order_detail_sorted['OrderDate'] = pd.to_datetime(order_detail_sorted['OrderDate'])
 order_detail_sorted.dropna(subset=['Code', 'CodeProduct', 'Origin'], inplace=True)
 
-# Análisis de datos
-order_detail_sorted_filtered_con_cupon = order_detail_sorted[
-    (order_detail_sorted['CouponDiscountAmt'] > 0) | (order_detail_sorted['CouponDiscountPct'] > 0)]
-pdvs_con_cupon = order_detail_sorted_filtered_con_cupon['PointOfSaleId'].unique()
-
-order_detail_sorted_filtered_sin_cupon = order_detail_sorted[
-    (order_detail_sorted['CouponDiscountAmt'] == 0.0) & (order_detail_sorted['CouponDiscountPct'] == 0.0)]
-pdvs_sin_cupon = order_detail_sorted_filtered_sin_cupon['PointOfSaleId'].unique()
-
-duplicados_entre_grupos = set(pdvs_con_cupon).intersection(set(pdvs_sin_cupon))
-pdvs_nunca_cupon = set(pdvs_sin_cupon) - set(pdvs_con_cupon)
 
 # Analizar frecuencia de compra online
 
@@ -108,13 +130,13 @@ order_detail_sorted = order_detail_sorted.merge(frequency_online_per_pdv, on='Po
 
 
 
-# Crear variable temporal
-start_date = order_detail_sorted['OrderDate'].min()
-end_date = order_detail_sorted['OrderDate'].max() + pd.Timedelta(days=1)
-date_range = pd.date_range(start=start_date, end=end_date)
-date_order_detail_sorted = pd.DataFrame(date_range, columns=['OrderDate'])
-date_order_detail_sorted['DayCount'] = (date_order_detail_sorted['OrderDate'] - start_date).dt.days + 1
-order_detail_sorted = pd.merge_asof(order_detail_sorted.sort_values('OrderDate'), date_order_detail_sorted, on='OrderDate', direction='forward')
+# # Crear variable temporal
+# start_date = order_detail_sorted['OrderDate'].min()
+# end_date = order_detail_sorted['OrderDate'].max() + pd.Timedelta(days=1)
+# date_range = pd.date_range(start=start_date, end=end_date)
+# date_order_detail_sorted = pd.DataFrame(date_range, columns=['OrderDate'])
+# date_order_detail_sorted['DayCount'] = (date_order_detail_sorted['OrderDate'] - start_date).dt.days + 1
+# order_detail_sorted = pd.merge_asof(order_detail_sorted.sort_values('OrderDate'), date_order_detail_sorted, on='OrderDate', direction='forward')
 
 # Crear variable de tipo de cupón
 order_detail_sorted['CouponDiscountAmt'] = order_detail_sorted['CouponDiscountAmt'].astype(float)
@@ -131,7 +153,9 @@ def clasificar_descuento(row):
 order_detail_sorted['Coupon_type'] = order_detail_sorted.apply(clasificar_descuento, axis=1)
 
 
-
+### GUARDAMOS EL PARQUET SIN VARIABLES NUEVAS
+# save_path = r'C:\Users\ctrujils\order_detail_sorted_limpio.parquet'
+# order_detail_sorted.to_parquet(save_path, index=False)
 
 # Recurrencia a la compra de cupones
 # print(order_detail_sorted[order_detail_sorted["Origin"] == "OFFLINE"]['PointOfSaleId'])
@@ -148,18 +172,28 @@ order_detail_sorted['PctgCouponUsed'] = order_detail_sorted['PctgCouponUsed'].fi
 
 #Dias transcurridos desde la ultima compra online (acumulado)
 
-order_detail_online = order_detail_online.sort_values(by=['PointOfSaleId', 'OrderDate'])
-order_detail_online['DaysBetweenPurchases'] = order_detail_online.groupby('PointOfSaleId')['OrderDate'].diff().dt.days
+order_detail_online = order_detail_online.sort_values(by=['PointOfSaleId', 'NameDistributor', 'OrderDate','Code'])
+
+order_detail_online['DaysBetweenPurchases'] = order_detail_online.groupby(['PointOfSaleId', 'NameDistributor'])['OrderDate'].diff().dt.days
+
 order_detail_online['DaysBetweenPurchases'] = order_detail_online['DaysBetweenPurchases'].fillna(0)
-order_detail_online['CumulativeAvgDaysBetweenPurchases'] = order_detail_online.groupby('PointOfSaleId')['DaysBetweenPurchases'].expanding().mean().reset_index(level=0, drop=True)
 
-order_detail_online_subset = order_detail_online[['PointOfSaleId', 'OrderDate', 'DaysBetweenPurchases', 'CumulativeAvgDaysBetweenPurchases']]
+order_detail_online['CumulativeAvgDaysBetweenPurchases'] = order_detail_online.groupby(['PointOfSaleId', 'NameDistributor'])['DaysBetweenPurchases'].expanding().mean().reset_index(level=[0, 1], drop=True)
+order_detail_online_subset = order_detail_online[['PointOfSaleId', 'OrderDate', 'NameDistributor', 'Code', 'DaysBetweenPurchases', 'CumulativeAvgDaysBetweenPurchases']]
 
-# Realiza el merge con el DataFrame order_detail_sorted
+num_filas_antes = order_detail_sorted.shape[0]
+
+
 order_detail_sorted = pd.merge(order_detail_sorted, 
                                order_detail_online_subset, 
-                               on=['PointOfSaleId', 'OrderDate'],
+                               on=['PointOfSaleId', 'OrderDate', 'NameDistributor', 'Code'],
                                how='left')
+
+
+num_filas_despues = order_detail_sorted.shape[0]
+assert num_filas_antes == num_filas_despues, f"El número de filas cambió después del merge: antes={num_filas_antes}, después={num_filas_despues}"
+
+
 
 
 # Booleana de ultima compra online
@@ -200,12 +234,12 @@ for _, g in gt:
 
 order_detail_sorted = pd.concat(digitalizacion)
 
+print('fin')
+
 
 # # # Guardar archivo final
 save_path = r'C:\Users\ctrujils\order_detail_sorted_v2.parquet'
 order_detail_sorted.to_parquet(save_path, index=False)
 
-print('fin')
-# # path = '/dbfs/mnt/MSM/raw_data/order_detail_cupons.parquet'
-# # save_file_to_format(order_detail_sorted, path=path, format="parquet")
 
+print('fin de verdad')
