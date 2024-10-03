@@ -1,17 +1,16 @@
 # MAGIC En este notebook desarrolaremos un modelo de regresión (Bayessian Ridge)
-import sys
 import pandas as pd
-from sklearn.linear_model import BayesianRidge, ARDRegression, LogisticRegression, SGDClassifier
+from sklearn.linear_model import BayesianRidge, ARDRegression, SGDClassifier
 from sklearn.naive_bayes import GaussianNB
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 import io_utils as iou
 from returns import pipeline, unsafe
 import asyncio
-import mlflow.pyfunc
+# import mlflow.pyfunc
 import itertools as it
-import numpy as np
+# import numpy as np
 
 # config = iou.read_config()
 # container_name = pipeline.flow(
@@ -30,6 +29,7 @@ import numpy as np
 # order_detail_sorted.to_parquet("data/order_detail_model.parquet")
 # order_detail_sorted.columns
 
+
 def create_lagged_variables(df, lag_variable, lag_periods, groupby_cols=None):
     if groupby_cols:
         for lag in lag_periods:
@@ -37,27 +37,50 @@ def create_lagged_variables(df, lag_variable, lag_periods, groupby_cols=None):
                 df.groupby(groupby_cols)[lag_variable].shift(lag).fillna(0)
     else:
         for lag in lag_periods:
-            df[f'{lag_variable}_LAG_{lag}'] = df[lag_variable].shift(lag).fillna(0)
-    
+            df[f'{lag_variable}_LAG_{lag}'] = df[lag_variable] \
+                .shift(lag).fillna(0)
+
     return df
 
-order_detail_sorted = pd.read_parquet("data/order_detail_model.parquet")
-order_detail_sorted["Online"] = order_detail_sorted.Origin.apply(lambda x: x == "Online")
+
+order_detail_sorted = \
+    pd.read_parquet("data/order_detail_sorted_segmentado.parquet")
+order_detail_sorted["Online"] = \
+    order_detail_sorted.Origin.apply(lambda x: x == "Online")
+
+online_offline_pdv = order_detail_sorted[["PointOfSaleId", "Online"]] \
+    .groupby("PointOfSaleId") \
+    .sum() \
+    .reset_index()
+online_pdv = online_offline_pdv[online_offline_pdv.Online > 0]
+order_detail_sorted = order_detail_sorted.merge(online_pdv["PointOfSaleId"], on="PointOfSaleId", how="right")
+
+
 gt = order_detail_sorted.groupby(['NameDistributor', 'PointOfSaleId'])
+
 digitalizacion = []
 for _, g in gt:
     g["Digitalizacion"] = g.Online.rolling(10, min_periods=1).sum()
+    g["ForwardOnline"] = g.Online.iloc[::-1] \
+                                 .rolling(5, min_periods=0) \
+                                 .sum().iloc[::-1] \
+                                       .apply(lambda x: x > 0)
     digitalizacion.append(g)
+
 order_detail_sorted = pd.concat(digitalizacion)
 order_detail_sorted = create_lagged_variables(
     order_detail_sorted, 'CouponDiscountPct',
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ['NameDistributor', 'Name'])
 order_detail_sorted.to_csv("data/digitalizacion.csv", sep=";")
 
+
 def get_index(df, starts_with):
     return df[[c for c in df.columns if c.startswith(starts_with)]] \
         .apply(lambda x: x.sum() > 0, axis=1)
-order_detail_sorted[["Coupon_type", "CouponDescription"]].groupby("Coupon_type").count()
+
+
+order_detail_sorted[["Coupon_type", "CouponDescription"]] \
+    .groupby("Coupon_type").count()
 coupon_index = get_index(order_detail_sorted, 'CouponDiscountAmt')
 pdvs_with_coupon = order_detail_sorted[coupon_index].PointOfSaleId.unique()
 len(pdvs_with_coupon)
@@ -65,45 +88,13 @@ len(order_detail_sorted.PointOfSaleId.unique())
 
 order_detail_sorted.columns
 
-descriptive = []
-for pdv in pdvs_with_coupon:
-    data = order_detail_sorted[coupon_index & (order_detail_sorted.PointOfSaleId == pdv)]
-    first_coupon = data.OrderDate.min()
-    before = order_detail_sorted[(order_detail_sorted.OrderDate < first_coupon) &
-                                 (order_detail_sorted.PointOfSaleId == pdv)]
-    after = order_detail_sorted[(order_detail_sorted.OrderDate >= first_coupon) &
-                                (order_detail_sorted.PointOfSaleId == pdv)]
-    if before.shape[0] and after.shape[0]:
-        results = {"pdv": pdv,
-                   "before_digitalizacion": before.Digitalizacion.mean(),
-                   "before_pedidos_online": before.Online.sum(),
-                   "before_pedidos": before.Online.count(),
-                   "before_online_ratio":
-                   before.Online.sum() if before.Online.sum() == 0 else before.Online.sum() / before.Online.count(),
-                   "before_sellout": before.Sellout.mean(),
-                   "before_coupon": before.CouponDiscountAmt.mean(),                   
-                   "after_digitalizacion": after.Digitalizacion.mean(),
-                   "after_pedidos_online": after.Online.sum(),
-                   "after_pedidos": after.Online.count(),
-                   "after_online_ratio":
-                   after.Online.sum() if after.Online.sum() == 0 else after.Online.sum() / after.Online.count(),
-                   "after_sellout": after.Sellout.mean(),
-                   "after_coupon": after.CouponDiscountAmt.mean(),
-                   "had_offline": before.Online.sum() < before.Online.count()}
-        descriptive.append(results)
-        if (before.Online.sum() < before.Online.count()) and (
-                before.Digitalizacion.mean() < after.Digitalizacion.mean()):
-            print(results)
-            print("-"*100)
-
-descriptive = pd.DataFrame(descriptive)
-descriptive[descriptive.had_offline]
 order_detail_sorted[
     order_detail_sorted.PointOfSaleId=="CLI0042747CLI0050757"][["Digitalizacion", "Online", "CouponDiscountAmt"]]
 
 pct_index = get_index(order_detail_sorted, 'CouponDiscountPct')
 fixed_index = pd.concat([coupon_index, pct_index], axis=1) \
                 .apply(lambda x: x[0] and not x[1], axis=1)
+
 pct_index.sum()
 fixed_index.sum()
 no_coupon_index = coupon_index.apply(lambda x: not x)
@@ -120,6 +111,20 @@ order_detail_sorted.Coupon_type.unique()
 order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type").mean()
 order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type").count()
 
+gr = order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type")
+order_detail_sorted[
+    order_detail_sorted.CouponDiscountAmt == order_detail_sorted.CouponDiscountAmt.max()][[
+        "Code", "PointOfSaleId", "OrderDate", "CouponDiscountAmt"
+]]
+
+output = []
+for g in gr:
+    d = g[1].describe()
+    d.columns = [g[0]]
+    output.append(d)
+pd.concat(output,axis=1)
+
+
 order_detail_sorted.columns
 df=order_detail_sorted.copy()
 # MAGIC ####Label encoding de "tipologia"
@@ -131,12 +136,18 @@ df=pd.get_dummies(df, columns=['season'], prefix='season')
 # MAGIC ### Filtro Sellout < 3000
 df['Sellout'].describe()
 
-coupon_cols = [c for c in order_detail_sorted.columns if c.startswith("CouponDiscountAmt")]
-coupon_poly_cols = ['CouponDiscountAmt^2'] + list(it.dropwhile(lambda x: not x.endswith("POLY_2"), coupon_cols))
+coupon_cols = [c for c in order_detail_sorted.columns
+               if c.startswith("CouponDiscountAmt")]
+coupon_poly_cols = ['CouponDiscountAmt^2'] + list(it.dropwhile(
+    lambda x: not x.endswith("POLY_2"), coupon_cols))
 coupon_cols = list(set(coupon_cols) - set(coupon_poly_cols))
 
-order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 0].CouponDiscountAmt.describe()
-order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 100].CouponDiscountAmt.describe()
+order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 0] \
+    .CouponDiscountAmt.describe()
+order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 100] \
+    .CouponDiscountAmt.describe()
+
+
 coupon_cutoff = 96
 def filter_lags(df, coupon_cutoff):
     for col in coupon_cols:
@@ -144,6 +155,7 @@ def filter_lags(df, coupon_cutoff):
     for col in coupon_poly_cols:
         df[col] = np.where(df[col] <= (coupon_cutoff ** 2), df[col], 0)
     return df
+
 
 df = df[df["CouponDiscountAmt"] <= coupon_cutoff]
 df = filter_lags(df, coupon_cutoff)
@@ -164,76 +176,78 @@ df.to_csv("filtered.csv", sep=";")
 
 # MAGIC ####Selección de columnas para el modelo
 feat_cols = [
-'season_Otoño',
-'season_Primavera',
-'season_Verano',
-'DayCount',
-'DayCount^2',
-'Tip_Bar Tradicional',
-'Tip_Cervecería',
-'Tip_Discoteca',
-'Tip_Establecimiento de Tapeo',
-'Tip_No Segmentado',
-'Tip_Noche Temprana',
-'Tip_Pastelería/Cafetería/Panadería',
-'Tip_Restaurante',
-'Tip_Restaurante de Imagen',
-'Tip_Restaurante de Imagen con Tapeo',
-'Orig_OFFLINE',
-'Type_Porcentual',
-'CouponDiscountAmt',
-'CouponDiscountAmt_LAG_1',
-'CouponDiscountAmt_LAG_2',
-'CouponDiscountAmt_LAG_3',
-'CouponDiscountAmt_LAG_4',
-'CouponDiscountAmt_LAG_5',
-'CouponDiscountAmt_LAG_6',
-'CouponDiscountAmt_LAG_7',
-'CouponDiscountAmt_LAG_8',
-'CouponDiscountAmt_LAG_9',
-'CouponDiscountAmt_LAG_10',
-'CouponDiscountAmt^2',
-'CouponDiscountAmt_LAG_1_POLY_2',
-'CouponDiscountAmt_LAG_2_POLY_2',
-'CouponDiscountAmt_LAG_3_POLY_2',
-'CouponDiscountAmt_LAG_4_POLY_2',
-'CouponDiscountAmt_LAG_5_POLY_2',
-'CouponDiscountAmt_LAG_6_POLY_2',
-'CouponDiscountAmt_LAG_7_POLY_2',
-'CouponDiscountAmt_LAG_8_POLY_2',
-'CouponDiscountAmt_LAG_9_POLY_2',
-'CouponDiscountAmt_LAG_10_POLY_2',
-'Sellout_LAG_1',
-'Sellout_LAG_2',
-'Sellout_LAG_3',
-'Sellout_LAG_4',
-'Sellout_LAG_5',
-'Sellout_LAG_6',
-'Sellout_LAG_7',
-'Sellout_LAG_8',
-'Sellout_LAG_9',
-'Sellout_LAG_10',
-'Sellout_LAG_1_POLY_2',
-'Sellout_LAG_2_POLY_2', 
-'Sellout_LAG_3_POLY_2', 
-'Sellout_LAG_4_POLY_2',
-'Sellout_LAG_5_POLY_2', 
-'Sellout_LAG_6_POLY_2', 
-'Sellout_LAG_7_POLY_2',
-'Sellout_LAG_8_POLY_2', 
-'Sellout_LAG_9_POLY_2', 
-'Sellout_LAG_10_POLY_2',
+    'season_Otoño',
+    'season_Primavera',
+    'season_Verano',
+    'DayCount',
+    'DayCount^2',
+    'Tip_Bar Tradicional',
+    'Tip_Cervecería',
+    'Tip_Discoteca',
+    'Tip_Establecimiento de Tapeo',
+    'Tip_No Segmentado',
+    'Tip_Noche Temprana',
+    'Tip_Pastelería/Cafetería/Panadería',
+    'Tip_Restaurante',
+    'Tip_Restaurante de Imagen',
+    'Tip_Restaurante de Imagen con Tapeo',
+    'Orig_OFFLINE',
+    'Type_Porcentual',
+    'CouponDiscountAmt',
+    'CouponDiscountAmt_LAG_1',
+    'CouponDiscountAmt_LAG_2',
+    'CouponDiscountAmt_LAG_3',
+    'CouponDiscountAmt_LAG_4',
+    'CouponDiscountAmt_LAG_5',
+    # 'CouponDiscountAmt_LAG_6',
+    # 'CouponDiscountAmt_LAG_7',
+    # 'CouponDiscountAmt_LAG_8',
+    # 'CouponDiscountAmt_LAG_9',
+    # 'CouponDiscountAmt_LAG_10',
+    'CouponDiscountAmt^2',
+    'CouponDiscountAmt_LAG_1_POLY_2',
+    'CouponDiscountAmt_LAG_2_POLY_2',
+    'CouponDiscountAmt_LAG_3_POLY_2',
+    'CouponDiscountAmt_LAG_4_POLY_2',
+    'CouponDiscountAmt_LAG_5_POLY_2',
+    # 'CouponDiscountAmt_LAG_6_POLY_2',
+    # 'CouponDiscountAmt_LAG_7_POLY_2',
+    # 'CouponDiscountAmt_LAG_8_POLY_2',
+    # 'CouponDiscountAmt_LAG_9_POLY_2',
+    # 'CouponDiscountAmt_LAG_10_POLY_2',
+    'Sellout_LAG_1',
+    'Sellout_LAG_2',
+    'Sellout_LAG_3',
+    'Sellout_LAG_4',
+    'Sellout_LAG_5',
+    # 'Sellout_LAG_6',
+    # 'Sellout_LAG_7',
+    # 'Sellout_LAG_8',
+    # 'Sellout_LAG_9',
+    # 'Sellout_LAG_10',
+    'Sellout_LAG_1_POLY_2',
+    'Sellout_LAG_2_POLY_2',
+    'Sellout_LAG_3_POLY_2',
+    'Sellout_LAG_4_POLY_2',
+    'Sellout_LAG_5_POLY_2', 
+    # 'Sellout_LAG_6_POLY_2', 
+    # 'Sellout_LAG_7_POLY_2',
+    # 'Sellout_LAG_8_POLY_2', 
+    # 'Sellout_LAG_9_POLY_2', 
+    # 'Sellout_LAG_10_POLY_2',
 ]
 
 target_col = 'Sellout'
 features = df[feat_cols]
 target = df[target_col]
-target_online = df.Orig_OFFLINE.apply(lambda x: not x)
+target_online = df.ForwardOnline
 target_digitalizacion = df.Digitalizacion
+
 
 def imprimir_nombres_caracteristicas(feat_cols):
     for indice, caracteristica in enumerate(feat_cols):
         print(f"Índice {indice}: {caracteristica}")
+
 
 def get_indexes(feat_cols, col_name):
     start = list(it.dropwhile(lambda x: not x.startswith(col_name), feat_cols))
@@ -241,6 +255,7 @@ def get_indexes(feat_cols, col_name):
     end = list(it.dropwhile(lambda x: x.startswith(col_name), start))
     end_index = len(feat_cols) - len(end)
     return start_index, end_index
+
 
 start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")
 # Llamada a la función con la lista feat_cols
@@ -263,7 +278,9 @@ weight_with_coupon = n_no_coupon / n_with_coupon
 
 #Creación del array de pesos
 feature_balance=features['CouponDiscountAmt']
-sample_weight = np.where(feature_balance == 0, weight_no_coupon, weight_with_coupon)
+sample_weight = np.where(feature_balance == 0,
+                         weight_no_coupon,
+                         weight_with_coupon)
 
 # MAGIC ####Aplicación del modelo y entrenamiento
 
@@ -271,6 +288,8 @@ sample_weight = np.where(feature_balance == 0, weight_no_coupon, weight_with_cou
 model_no_weight = BayesianRidge(fit_intercept=False)
 model_no_weight.fit(features, target)
 model_no_weight.coef_[start_index:end_index]
+model_no_weight.coef_[start_index:(start_index+6)].sum()
+
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)
 ardr.coef_[start_index:end_index]
@@ -281,6 +300,9 @@ np.diag(modelo_digitalizacion.sigma_)
 np.diag(modelo_digitalizacion.sigma_)[start_index:end_index]
 nb = GaussianNB()
 nb.fit(features.iloc[:, start_index:end_index], target_online)
+sgdc = SGDClassifier(fit_intercept=True, loss="log_loss")
+sgdc.fit(features, target_online)
+sgdc.predict_log_proba(features)
 online_predict = nb.predict(features.iloc[:, start_index:end_index])
 target_online
 online_predict
@@ -306,18 +328,33 @@ for k in range(600):
     r = np.dot(features.iloc[:, start_index:end_index][(df.year==2023)], c).sum()
     returns.append((r - investment) / investment)
 
-plt.hist(returns, bins=30)
+plt.hist(returns, bins=30, density=True,
+         color='pink',
+         edgecolor='red')
+plt.title("Retorno de la inversión en cupones")
+plt.xlabel("Retorno porcentual")
+plt.ylabel("Frequencia")
 plt.savefig("plots/returns.jpg")
 plt.close()
-model_no_weight.coef_[start_index:end_index]
-coef_cupones_2 = ardr.coef_[start_index:(end_index - 11)]
-plt.bar(range(len(coef_cupones_2)), coef_cupones_2, color='skyblue', edgecolor='black')
-plt.title('Coeficientes del Modelo')
-plt.xlabel('Índice del Coeficiente')
-plt.ylabel('Valor del Coeficiente')
-plt.xticks(range(len(coef_cupones_2)))
-plt.savefig("plots/coeficiente.jpg")
-plt.close()
+
+coef_cupones_2 = model_no_weight.coef_[start_index:(start_index + 6)]
+coef_cupones_2
+
+
+def plot_coefs(coefs, model_name):
+    plt.bar(range(len(coefs)), coefs,
+            color='pink',
+            edgecolor='red')
+
+    plt.title(f'Coeficientes del Modelo {model_name}')
+    plt.xlabel('Índice del Coeficiente')
+    plt.ylabel('Valor del Coeficiente')
+    plt.xticks(range(len(coef_cupones_2)))
+    plt.savefig(f"plots/coeficiente_{model_name}.jpg")
+    plt.close()
+
+
+plot_coefs(coef_cupones_2, "modelo_general")
 
 coef_cupones_2 = model_no_weight.coef_[(start_index + 11):end_index]
 plt.bar(range(len(coef_cupones_2)), coef_cupones_2, color='skyblue', edgecolor='black')
@@ -327,7 +364,6 @@ plt.ylabel('Valor del Coeficiente')
 plt.xticks(range(len(coef_cupones_2)))
 plt.savefig("plots/coeficiente_2.jpg")
 plt.close()
-
 
     
 np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
@@ -339,6 +375,7 @@ np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
                                                (df.CouponDiscountAmt >= 20)],
        model_no_weight.coef_[start_index:end_index]).sum()
 
+
 def fit_model(features, target, target_digitalizacion):
     model = BayesianRidge(fit_intercept=False)
     model.fit(features, target)
@@ -348,13 +385,15 @@ def fit_model(features, target, target_digitalizacion):
     modelo_digitalizacion.fit(features, target_digitalizacion)    
     return model, ardr, modelo_digitalizacion
 
+
 def generate_data_for_simulation(num_lags, coupon_level, poly_grade):
     out_list = [np.eye(num_lags) * (coupon_level ** k)
                 for k in range(1, poly_grade + 1)]
     return np.concatenate(out_list, axis=1)
 
+
 def make_probability_plot(model_name, model):
-    data = [generate_data_for_simulation(11, cl, 2)
+    data = [generate_data_for_simulation(6, cl, 2)
             for cl in range(1, 80, 2)]
     results = []
     for d in data:
@@ -368,6 +407,7 @@ def make_probability_plot(model_name, model):
     plt.savefig(f"plots/log_proba_{plot_name}.png")
     plt.close()
 
+    
 def make_plot(model_name, results_por_nivel, labels, y_label):
     plot_name = model_name.replace(" ", "_").lower()
     plt.figure().set_figwidth(10)    
@@ -378,7 +418,8 @@ def make_plot(model_name, results_por_nivel, labels, y_label):
     plt.grid(True)
     plt.savefig(f"plots/{plot_name}.jpg")
     plt.close()
-    
+
+
 def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, digi=False):
     start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")
     if not digi:
@@ -388,7 +429,7 @@ def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, 
     
     sigma_cupones = np.diag(model_no_weight.sigma_)[start_index:end_index]
 
-    data = [generate_data_for_simulation(11, cl, 2)
+    data = [generate_data_for_simulation(6, cl, 2)
             for cl in range(1, levels, 2)]
 
     results_por_nivel = []
@@ -419,8 +460,9 @@ def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, 
         make_plot(f"{model_name} diffs", results_por_diff, labels, y_label)
     
     
-make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2, "Digitalizacion", False, True)
-make_simulations("Modelo General", model_no_weight, coupon_cutoff + 2)
+make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2,
+                 "Digitalizacion", False, True)
+make_simulations("Modelo General", model_no_weight, 76)
 make_probability_plot("Modelo probabilidad digitalizacion", nb)
 
 indices = {"fixed": fixed_model_index, "pct": pct_model_index}
@@ -429,32 +471,34 @@ for k in indices:
     t = target[indices[k]]
     td = target_digitalizacion[indices[k]]
     br, ardr, md = fit_model(f, t, td)
-    make_simulations(f"Modelo digitalizacion {k}", md, 2, "Digitalizacion", False)
-    make_simulations(f"Modelo general {k}", br, coupon_cutoff + 2)
-    
+    print(br.coef_[start_index:(start_index+6)].sum())
+    make_simulations(f"Modelo digitalizacion {k}", md, 2,
+                     "Digitalizacion", False)
+    make_simulations(f"Modelo general {k}", br, 76)
+    plot_coefs(br.coef_[start_index:(start_index+6)], k)
 
 years = [2023, 2024]
 tipologias = [c for c in features.columns if c.startswith("Tip")
               if c not in ["Tip_Tap room", 'Tip_Restaurante de Imagen con Tapeo']]
 
-for colname in tipologias:
-    f = features[features[colname]]
-    t = target[features[colname]]
-    to = target_online[features[colname]]
-    br, ardr, nb = fit_model(f, t, to)
-    try:
-        make_simulations(f"Modelo {colname}", br, 22)
-        make_probability_plot(f"Modelo General {colname}", nb)                    
-    except Exception as e:
-        print(e)
-    for y in years:
-        try:
-            ft = features[features[colname] & (df.year == y)]
-            tt = target[features[colname] & (df.year == y)]
-            tto = target_online[features[colname] & (df.year == y)]
-            br, ardr, nb = fit_model(ft, tt, tto)
-            make_simulations(f"Modelo {colname} {y}", br, 22)
-            make_probability_plot(f"Probabilidad Online {colname} {y}", nb)            
-        except Exception as e:
-            print(e)
+# for colname in tipologias:
+#     f = features[features[colname]]
+#     t = target[features[colname]]
+#     to = target_online[features[colname]]
+#     br, ardr, nb = fit_model(f, t, to)
+#     try:
+#         make_simulations(f"Modelo {colname}", br, 22)
+#         make_probability_plot(f"Modelo General {colname}", nb)                    
+#     except Exception as e:
+#         print(e)
+#     for y in years:
+#         try:
+#             ft = features[features[colname] & (df.year == y)]
+#             tt = target[features[colname] & (df.year == y)]
+#             tto = target_online[features[colname] & (df.year == y)]
+#             br, ardr, nb = fit_model(ft, tt, tto)
+#             make_simulations(f"Modelo {colname} {y}", br, 22)
+#             make_probability_plot(f"Probabilidad Online {colname} {y}", nb)            
+#         except Exception as e:
+#             print(e)
             
