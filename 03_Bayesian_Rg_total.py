@@ -48,43 +48,37 @@ def create_lagged_variables(df, lag_variable, lag_periods, groupby_cols=None):
     return df
 
 
-path = r'C:\Users\ctrujils\order_detail_sorted_segmentacion.parquet'
+path = r'C:\Users\ctrujils\order_detail_sorted_cluster.parquet'
 order_detail_sorted = pd.read_parquet(path)
 
 
-# gt = order_detail_sorted.groupby(['NameDistributor', 'PointOfSaleId'])
-# order_detail_sorted['IsOnline'] = order_detail_sorted['Origin'] == 'Online'
-# digitalizacion = []
+##### FILTRO : ELIMINAMOS DEL ANALISIS A CERES Y BALEARES
 
-# list(gt)[0][1].IsOnline \
-#               .iloc[::-1].rolling(5, min_periods=0) \
-#                          .sum().iloc[::-1] \
-#                                .apply(lambda x: x > 0)
-# list(gt)[0][1][["OrderDate", "IsOnline"]]
-# list(gt)[0][1][["OrderDate", "IsOnline"]].shift(-1)
-# list(gt)[0][1][["OrderDate", "IsOnline"]] \
-#     .IsOnline \
-#     .shift(-1) \
-#     .rolling(5, min_periods=0) \
-#     .sum() \
-#     .apply(lambda x: x > 0)
-
-# # .iloc[::-1]
+order_detail_sorted =order_detail_sorted[~order_detail_sorted['NameDistributor'].isin(['Ceres', 'Voldis Baleares'])]
 
 
-# for _, g in gt:
-#     g["Digitalizacion"] = g.IsOnline.rolling(10, min_periods=1).sum()
-#     g["ForwardIsOnline"] = g.IsOnline \
-#                            .iloc[::-1].rolling(5, min_periods=0).sum().iloc[::-1] \
-#                            .apply(lambda x: x > 0)
-#     digitalizacion.append(g)
 
-# order_detail_sorted = pd.concat(digitalizacion)
+
+### Creamos variables laggeadas
 order_detail_sorted = create_lagged_variables(
     order_detail_sorted, 'CouponDiscountPct',
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ['NameDistributor', 'Name'])
 # order_detail_sorted.to_csv("data/digitalizacion.csv", sep=";")
 
+### Creamos la variable Season
+
+def asignar_estacion(mes):
+    if mes in [12, 1, 2]:
+        return 'Invierno'
+    elif mes in [3, 4, 5]:
+        return 'Primavera'
+    elif mes in [6, 7, 8]:
+        return 'Verano'
+    elif mes in [9, 10, 11]:
+        return 'Otoño'
+
+# Crear la nueva columna 'season' aplicando la función a la columna 'OrderDate'
+order_detail_sorted['season'] = order_detail_sorted['OrderDate'].dt.month.apply(asignar_estacion)
 
 def get_index(df, starts_with):
     return df[[c for c in df.columns if c.startswith(starts_with)]] \
@@ -242,109 +236,8 @@ model_no_weight.coef_[start_index:(start_index+6)].sum()
 general_predictions = model_no_weight.predict(features)
 
 
-# # SUBMODELO PARA UN PDV
-
-pdvs = df['PointOfSaleId'].unique()  
-#lista para los modos_pdvs
-modelos_pdv = []
-
-for pdv in pdvs:
-    df_pdv=df[df['PointOfSaleId']== pdv].reset_index(drop=True, inplace=False)
-    x_pdv=df_pdv[feat_cols]
-    y_pdv=df_pdv[target_col]
-
-    y_pred_general_pdv=model_no_weight.predict(x_pdv)
-    modelo_pdv = BayesianRidge()
-    x_to_train = pd.concat([x_pdv,x_pdv])
-    y_to_train = pd.concat([y_pdv,pd.DataFrame({"Sellout": y_pred_general_pdv})],axis=0)
 
 
-    modelo_pdv.fit(x_to_train, y_to_train) 
-    
-    modelo_info = {
-        'pdv': pdv,
-        'modelo': modelo_pdv
-    }
-
-    # Agregar el diccionario a la lista de modelos
-    modelos_pdv.append(modelo_info)
-
-# Guardar la lista de diccionarios
-with open('submodelos_pdv.pkl', 'wb') as file:
-    pickle.dump(modelos_pdv, file)
-    
-## DF con coeficientes de variables CPDiscountAmt y ^2 por pdv y lags
-features_interesantes = ['CouponDiscountAmt',
-    'CouponDiscountAmt_LAG_1',
-    'CouponDiscountAmt_LAG_2',
-    'CouponDiscountAmt_LAG_3',
-    'CouponDiscountAmt_LAG_4',
-    'CouponDiscountAmt_LAG_5',
-    'CouponDiscountAmt^2',
-    'CouponDiscountAmt_LAG_1_POLY_2',
-    'CouponDiscountAmt_LAG_2_POLY_2',
-    'CouponDiscountAmt_LAG_3_POLY_2',
-    'CouponDiscountAmt_LAG_4_POLY_2',
-    'CouponDiscountAmt_LAG_5_POLY_2',] 
-
-indices_interes = [x_pdv.columns.get_loc(var) for var in features_interesantes]
-
-df_coeficientes = pd.DataFrame(columns=['pdv'] + features_interesantes)
-
-for entry in modelos_pdv:
-    pdv_id = entry['pdv']
-    modelo_pdv = entry['modelo']
-
-    coeficientes = modelo_pdv.coef_
-    coef_interesantes = coeficientes[indices_interes]
-    
-    # Crear la fila correctamente, asegurando que pdv_id esté al principio
-    fila = [pdv_id] + list(coef_interesantes)
-    df_coeficientes.loc[len(df_coeficientes)] = fila 
-
-df_coeficientes.to_csv('coeficientes_por_pdv.csv', index=False)
-
-
-
-## Análisis de PCA
-
-data_for_pca = df_coeficientes[features_interesantes]
-
-# Estandarizar los datos
-scaler = StandardScaler()
-data_scaled = scaler.fit_transform(data_for_pca)
-
-# Aplicar PCA
-pca = PCA(n_components=2)  
-pca_result = pca.fit_transform(data_scaled)
-
-# Crear un DataFrame con los resultados de PCA
-df_pca = pd.DataFrame(data=pca_result, columns=['PC1', 'PC2'])
-
-# Agregar la columna de pdv para referencia
-df_pca['pdv'] = df_coeficientes['pdv'].values
-
-df_pca.to_csv('pca_pdvs_coeficientes.csv', index=False)
-
-df_pca=df_pca.sort_values(by='PC1', ascending=False)
-
-tops_pdvs= df_pca.head()
-bottom_pdvs=df_pca.tail()
-
-
-#Merge con nuestro df
-df_merged = pd.merge(df, df_pca[['pdv', 'PC1']], left_on='PointOfSaleId', right_on='pdv', how='left')
-# Cuartiles basados en PC1
-df_merged=df_merged.sort_values(by='PC1', ascending=False)
-df_merged['Cuartil'] = pd.qcut(df_merged['PC1'], q=4, labels=['75-100%', '50-75%', '25-50%', 'Top 25%'])
-
-# Sellout medio por cuartil
-sellout_por_cuartil = df_merged.groupby('Cuartil')['Sellout'].mean()
-
-
-
-
-print('fin')
 # MAGIC ####Aplicación del modelo y entrenamiento
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)

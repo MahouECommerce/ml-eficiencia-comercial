@@ -24,10 +24,10 @@ for cluster, sub_dict in segmentacion.items():
         data.append((point_of_sale_id, cluster_value))
 
 # Convertir la lista de tuplas en un DataFrame
-df_cluster = pd.DataFrame(data, columns=['company_id', 'Cluster'])
+order_detail_sorted_cluster = pd.DataFrame(data, columns=['company_id', 'Cluster'])
 
 
-maestro_clientes=pd.merge(maestro_clientes,df_cluster, on='company_id', how='left')
+maestro_clientes=pd.merge(maestro_clientes,order_detail_sorted_cluster, on='company_id', how='left')
 
 
 
@@ -39,13 +39,16 @@ maestro_clientes.to_parquet(save_path, index=False)
 
 
 
-path = r'C:\Users\ctrujils\Downloads\order_detail_total.parquet'
+path = r'C:\Users\ctrujils\order_detail_sorted_normalizado.parquet'
 order_detail = pd.read_parquet(path)
 
 
 # print(order_detail.head())
-# Filtrar devoluciones
-order_detail = order_detail[order_detail['TotalOrderQuantity'] > 0]
+# Filtrar devoluciones 
+# order_detail = order_detail[order_detail['TotalOrderQuantity'] > 0]
+
+
+
 
 # Feature Engineering
 order_detail['CouponCode'] = order_detail['CouponCode'].replace('', 0).fillna(0)
@@ -99,7 +102,7 @@ def classification_origin(row):
 
 order_detail_sorted['Origin'] = order_detail_sorted.apply(classification_origin, axis=1)
 
-maestro_clientes = maestro_clientes[['tipologia', 'Cluster' ,'company_id']]
+maestro_clientes = maestro_clientes[['tipologia', 'Cluster','abc','company_id']]
 order_detail_sorted = pd.merge(order_detail_sorted, maestro_clientes, left_on='PointOfSaleId', right_on='company_id', how='left')
 order_detail_sorted.drop(columns='company_id', inplace=True)
 order_detail_sorted['tipologia'] = order_detail_sorted['tipologia'].fillna('No Segmentado')
@@ -107,7 +110,7 @@ order_detail_sorted['tipologia'] = order_detail_sorted['tipologia'].fillna('No S
 # Limpieza de datos
 order_detail_sorted = order_detail_sorted[['Code', 'OrderDate', 'Sellout','CodeProduct','Name', 'NameDistributor', 
                                            'PointOfSaleId', 'CouponCode', 'CouponDiscountAmt', 'CouponDiscountPct', 
-                                           'CouponDescription', 'InsertionOrigin', 'Origin', 'tipologia']]
+                                           'CouponDescription', 'InsertionOrigin', 'Origin', 'tipologia','Cluster','abc']]
 
 order_detail_sorted['NameDistributor'] = order_detail_sorted['NameDistributor'].apply(lambda x: x.replace(' BC', '').title())
 
@@ -119,6 +122,61 @@ a['OrderDate'] = pd.to_datetime(a['OrderDate']).dt.date
 order_detail_sorted = pd.concat([a, pedidos_online], axis=0)
 order_detail_sorted['OrderDate'] = pd.to_datetime(order_detail_sorted['OrderDate'])
 order_detail_sorted.dropna(subset=['Code', 'CodeProduct', 'Origin'], inplace=True)
+
+# Normalizar la columna de cupones
+
+order_detail_sorted_unicos = order_detail_sorted[['CouponCode','CouponDescription']].drop_duplicates()
+order_detail_sorted_unicos.head(10)
+
+def normalize_string(s):
+    if pd.isna(s):
+        return s
+    return s.strip().lower()
+
+def normalize_coupon(row):
+    coupon_code = normalize_string(row['CouponCode']) if isinstance(row['CouponCode'], str) else None
+    coupon_desc = normalize_string(row['CouponDescription']) if isinstance(row['CouponDescription'], str) else None
+    discount_pct = row['CouponDiscountPct']
+    discount_amt = row['CouponDiscountAmt']
+
+    # Regla 1: Si el campo discount_amt es Cero o NaN, se indica que no hay cupón ('No cupón').
+    if pd.isna(discount_amt) or discount_amt == 0:
+        return "No cupón"
+
+    # Regla 2: Si CouponCode y CouponDescription son iguales (después de normalizarlos), se utiliza el valor de CouponCode.
+    if coupon_code and coupon_code == coupon_desc:
+        return row['CouponCode']  
+
+    # Regla 3: Si solo uno de los campos (CouponCode o CouponDescription) está informado y CouponDiscountAmt es mayor a 0, se utiliza el campo informado.
+    if coupon_code and not coupon_desc and discount_amt > 0:
+        return row['CouponCode']
+    if coupon_desc and not coupon_code and discount_amt > 0:
+        return row['CouponDescription']
+    
+    # Regla 4: Si discount_pct coincide con alguna parte de CouponCode o CouponDescription (como string), se utiliza ese campo.
+    if not pd.isna(discount_pct):
+        discount_str = f"{int(discount_pct)}"  # Convertimos discount_pct a string para hacer la comparación
+        if coupon_code and discount_str in coupon_code:
+            return row['CouponCode']
+        elif coupon_desc and discount_str in coupon_desc:
+            return row['CouponDescription']
+
+    # Regla 5: Si el valor de CouponDiscountAmt coincide con CouponCode o CouponDescription (como string), se utiliza ese campo.
+    if not pd.isna(discount_amt):
+        discount_amt_str = f"{int(discount_amt)}"  # Convertimos el valor de CouponDiscountAmt a string
+        if coupon_code and discount_amt_str in coupon_code:
+            return row['CouponCode']
+        elif coupon_desc and discount_amt_str in coupon_desc:
+            return row['CouponDescription']
+
+    # Regla final: Si no se cumple ninguna regla anterior, se devuelve 'Unknown'.
+    return "Unknown"
+
+# Aplicar la normalización al dataframe
+order_detail_sorted['NormalizedCoupon'] = order_detail_sorted.apply(normalize_coupon, axis=1)
+
+
+
 
 
 # Analizar frecuencia de compra online
@@ -234,12 +292,14 @@ for _, g in gt:
 
 order_detail_sorted = pd.concat(digitalizacion)
 
-print('fin')
+
+# # # # Guardar archivo final
+# save_path = r'C:\Users\ctrujils\order_detail_sorted_v2.parquet'
+# order_detail_sorted.to_parquet(save_path, index=False)
 
 
-# # # Guardar archivo final
-save_path = r'C:\Users\ctrujils\order_detail_sorted_v2.parquet'
+
+save_path = r'C:\Users\ctrujils\order_detail_sorted_normalizado.parquet'
 order_detail_sorted.to_parquet(save_path, index=False)
-
 
 print('fin de verdad')
