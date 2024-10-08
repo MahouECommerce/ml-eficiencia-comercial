@@ -1,4 +1,4 @@
-# MAGIC En este notebook desarrolaremos un modelo de regresión (Bayessian Ridge)
+# En este notebook desarrolaremos un modelo de regresión (Bayessian Ridge)
 import pandas as pd
 from sklearn.linear_model import BayesianRidge, ARDRegression, SGDClassifier
 from sklearn.naive_bayes import GaussianNB
@@ -30,6 +30,21 @@ import itertools as it
 # order_detail_sorted.columns
 
 
+def create_day_count_df(order_detail_sorted):
+    # Obtener la fecha de inicio y fin
+    start_date = order_detail_sorted['OrderDate'].min()
+    end_date = order_detail_sorted['OrderDate'].max()
+
+    end_date_adjusted = end_date + pd.Timedelta(days=1)
+
+    # Crear un rango de fechas que incluya el día después del final
+    date_range = pd.date_range(start=start_date, end=end_date_adjusted)
+    date_df = pd.DataFrame(date_range, columns=['OrderDate'])
+    date_df['DayCount'] = (date_df['OrderDate'] - start_date).dt.days + 1
+
+    return date_df
+
+
 def create_lagged_variables(df, lag_variable, lag_periods, groupby_cols=None):
     if groupby_cols:
         for lag in lag_periods:
@@ -43,8 +58,53 @@ def create_lagged_variables(df, lag_variable, lag_periods, groupby_cols=None):
     return df
 
 
+def get_season(mes):
+    if mes in [12, 1, 2]:
+        return 'Invierno'
+    elif mes in [3, 4, 5]:
+        return 'Primavera'
+    elif mes in [6, 7, 8]:
+        return 'Verano'
+    elif mes in [9, 10, 11]:
+        return 'Otoño'
+    else:
+        return 'Desconocido'
+
+
 order_detail_sorted = \
-    pd.read_parquet("data/order_detail_sorted_segmentado.parquet")
+    pd.read_parquet("data/order_detail_sorted_normalizado.parquet")
+order_detail_sorted = order_detail_sorted[
+    ~order_detail_sorted.NameDistributor.isin(['Voldis Baleares', 'Ceres'])]
+check = order_detail_sorted[["PointOfSaleId", "NameDistributor"]] \
+    .groupby("PointOfSaleId") \
+    .nunique()
+order_detail_sorted = order_detail_sorted[
+    ~order_detail_sorted.PointOfSaleId.isin(
+        check[check.NameDistributor > 1].reset_index().PointOfSaleId)]
+
+distribuidores_por_pdv = \
+    order_detail_sorted.groupby('PointOfSaleId')['NameDistributor'].nunique().reset_index()
+multiples_distribuidores = distribuidores_por_pdv[distribuidores_por_pdv['NameDistributor'] > 1]
+multiples_distribuidores
+
+order_detail_sorted = order_detail_sorted[order_detail_sorted.Sellout < 2000]
+
+order_detail_sorted = \
+    order_detail_sorted.sort_values(by="OrderDate", ascending=True)
+
+order_detail_sorted['OrderDate'] = \
+    pd.to_datetime(order_detail_sorted['OrderDate'])
+order_detail_sorted['month'] = order_detail_sorted['OrderDate'].dt.month
+order_detail_sorted['season'] = order_detail_sorted['month'].apply(get_season)
+
+day_count_df = create_day_count_df(order_detail_sorted)
+order_detail_sorted = order_detail_sorted.merge(
+    day_count_df, how="left", on="OrderDate")
+
+for c in ['DayCount', 'CouponDiscountAmt', 'Sellout']:
+    new_name = f"{c}^2"
+    order_detail_sorted[new_name] = order_detail_sorted[c]**2
+
 order_detail_sorted["Online"] = \
     order_detail_sorted.Origin.apply(lambda x: x == "Online")
 
@@ -53,14 +113,14 @@ online_offline_pdv = order_detail_sorted[["PointOfSaleId", "Online"]] \
     .sum() \
     .reset_index()
 online_pdv = online_offline_pdv[online_offline_pdv.Online > 0]
-order_detail_sorted = order_detail_sorted.merge(online_pdv["PointOfSaleId"], on="PointOfSaleId", how="right")
-
+order_detail_sorted = order_detail_sorted.merge(
+    online_pdv["PointOfSaleId"], on="PointOfSaleId", how="right")
 
 gt = order_detail_sorted.groupby(['NameDistributor', 'PointOfSaleId'])
 
 digitalizacion = []
 for _, g in gt:
-    g["Digitalizacion"] = g.Online.rolling(10, min_periods=1).sum()
+    g["Digitalizacion"] = g.Online.rolling(5, min_periods=1).sum()
     g["ForwardOnline"] = g.Online.iloc[::-1] \
                                  .rolling(5, min_periods=0) \
                                  .sum().iloc[::-1] \
@@ -68,10 +128,15 @@ for _, g in gt:
     digitalizacion.append(g)
 
 order_detail_sorted = pd.concat(digitalizacion)
-order_detail_sorted = create_lagged_variables(
-    order_detail_sorted, 'CouponDiscountPct',
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ['NameDistributor', 'Name'])
+for c in ["CouponDiscountAmt", "Sellout",
+          "CouponDiscountAmt^2", "Sellout^2"]:
+    order_detail_sorted = create_lagged_variables(
+        order_detail_sorted, c,
+        [1, 2, 3, 4, 5], ['NameDistributor', 'Name'])
+
+
 order_detail_sorted.to_csv("data/digitalizacion.csv", sep=";")
+order_detail_sorted.columns
 
 
 def get_index(df, starts_with):
@@ -81,58 +146,26 @@ def get_index(df, starts_with):
 
 order_detail_sorted[["Coupon_type", "CouponDescription"]] \
     .groupby("Coupon_type").count()
-coupon_index = get_index(order_detail_sorted, 'CouponDiscountAmt')
-pdvs_with_coupon = order_detail_sorted[coupon_index].PointOfSaleId.unique()
-len(pdvs_with_coupon)
-len(order_detail_sorted.PointOfSaleId.unique())
+# coupon_index = get_index(order_detail_sorted, 'CouponDiscountAmt')
+# pdvs_with_coupon = order_detail_sorted[coupon_index].PointOfSaleId.unique()
 
-order_detail_sorted.columns
+# pct_index = get_index(order_detail_sorted, 'CouponDiscountPct')
+# fixed_index = pd.concat([coupon_index, pct_index], axis=1) \
+#                 .apply(lambda x: x[0] and not x[1], axis=1)
+# no_coupon_index = coupon_index.apply(lambda x: not x)
+# fixed_model_index = pd.concat([no_coupon_index, fixed_index], axis=1) \
+#                       .apply(lambda x: x[0] or x[1], axis=1)
+# pct_model_index = pd.concat([no_coupon_index, pct_index], axis=1) \
+#                       .apply(lambda x: x[0] or x[1], axis=1)
 
-order_detail_sorted[
-    order_detail_sorted.PointOfSaleId=="CLI0042747CLI0050757"][["Digitalizacion", "Online", "CouponDiscountAmt"]]
-
-pct_index = get_index(order_detail_sorted, 'CouponDiscountPct')
-fixed_index = pd.concat([coupon_index, pct_index], axis=1) \
-                .apply(lambda x: x[0] and not x[1], axis=1)
-
-pct_index.sum()
-fixed_index.sum()
-no_coupon_index = coupon_index.apply(lambda x: not x)
-fixed_model_index = pd.concat([no_coupon_index, fixed_index], axis=1) \
-                      .apply(lambda x: x[0] or x[1], axis=1)
-pct_model_index = pd.concat([no_coupon_index, pct_index], axis=1) \
-                      .apply(lambda x: x[0] or x[1], axis=1)
-
-no_coupon_index.sum()
-fixed_index.sum()
-pct_index.sum()
-order_detail_sorted.shape
-order_detail_sorted.Coupon_type.unique()
-order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type").mean()
-order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type").count()
-
-gr = order_detail_sorted[["Coupon_type", "CouponDiscountAmt"]].groupby("Coupon_type")
-order_detail_sorted[
-    order_detail_sorted.CouponDiscountAmt == order_detail_sorted.CouponDiscountAmt.max()][[
-        "Code", "PointOfSaleId", "OrderDate", "CouponDiscountAmt"
-]]
-
-output = []
-for g in gr:
-    d = g[1].describe()
-    d.columns = [g[0]]
-    output.append(d)
-pd.concat(output,axis=1)
-
-
-order_detail_sorted.columns
-df=order_detail_sorted.copy()
+df = order_detail_sorted.copy()
+df.columns
 # MAGIC ####Label encoding de "tipologia"
-df=pd.get_dummies(df, columns=['tipologia'], prefix='Tip')
-df=pd.get_dummies(df, columns=['Origin'], prefix='Orig')
-df=pd.get_dummies(df, columns=['Coupon_type'], prefix='Type')
-df=pd.get_dummies(df, columns=['season'], prefix='season')
-
+df = pd.get_dummies(df, columns=['Origin'], prefix='Orig')
+df = pd.get_dummies(df, columns=['NameDistributor'], prefix='Distributor')
+df = pd.get_dummies(df, columns=['Coupon_type'], prefix='Type')
+df = pd.get_dummies(df, columns=['season'], prefix='season')
+df.columns
 # MAGIC ### Filtro Sellout < 3000
 df['Sellout'].describe()
 
@@ -148,7 +181,9 @@ order_detail_sorted[order_detail_sorted.CouponDiscountAmt > 100] \
     .CouponDiscountAmt.describe()
 
 
-coupon_cutoff = 96
+coupon_cutoff = 72
+
+
 def filter_lags(df, coupon_cutoff):
     for col in coupon_cols:
         df[col] = np.where(df[col] <= coupon_cutoff, df[col], 0)
@@ -161,84 +196,50 @@ df = df[df["CouponDiscountAmt"] <= coupon_cutoff]
 df = filter_lags(df, coupon_cutoff)
 df.to_csv("filtered.csv", sep=";")
 
-# df=df[df['year']==2023]
-# df=df[df['Sellout']]
-
-# prueba=features[features.columns[17:39]]
-# prueba
-# coef_with_weight
-
-# MAGIC %md
-# MAGIC #### Comparación sellout inversión
-# df['Sellout'].sum()
-# np.dot(prueba,coef_no_weight[17:39]).sum()
-# df['CouponDiscountAmt'].sum()
-
-# MAGIC ####Selección de columnas para el modelo
 feat_cols = [
     'season_Otoño',
     'season_Primavera',
     'season_Verano',
-    'DayCount',
-    'DayCount^2',
-    'Tip_Bar Tradicional',
-    'Tip_Cervecería',
-    'Tip_Discoteca',
-    'Tip_Establecimiento de Tapeo',
-    'Tip_No Segmentado',
-    'Tip_Noche Temprana',
-    'Tip_Pastelería/Cafetería/Panadería',
-    'Tip_Restaurante',
-    'Tip_Restaurante de Imagen',
-    'Tip_Restaurante de Imagen con Tapeo',
+    'DayCount', 'DayCount^2',
+    # 'Distributor_Bebicer',
+    'Distributor_Voldis Coruña',
+    'Distributor_Voldis Granada', 'Distributor_Voldis Madrid',
+    'Distributor_Voldis Murcia', 'Distributor_Voldis Valencia',
     'Orig_OFFLINE',
     'Type_Porcentual',
+    # 'DaysBetweenPurchases',
+    # 'CumulativeAvgDaysBetweenPurchases',
+    # "LastPurchaseOnline",
+    # 'Digitalizacion',
+    # 'ForwardOnline',
     'CouponDiscountAmt',
     'CouponDiscountAmt_LAG_1',
     'CouponDiscountAmt_LAG_2',
     'CouponDiscountAmt_LAG_3',
     'CouponDiscountAmt_LAG_4',
     'CouponDiscountAmt_LAG_5',
-    # 'CouponDiscountAmt_LAG_6',
-    # 'CouponDiscountAmt_LAG_7',
-    # 'CouponDiscountAmt_LAG_8',
-    # 'CouponDiscountAmt_LAG_9',
-    # 'CouponDiscountAmt_LAG_10',
     'CouponDiscountAmt^2',
-    'CouponDiscountAmt_LAG_1_POLY_2',
-    'CouponDiscountAmt_LAG_2_POLY_2',
-    'CouponDiscountAmt_LAG_3_POLY_2',
-    'CouponDiscountAmt_LAG_4_POLY_2',
-    'CouponDiscountAmt_LAG_5_POLY_2',
-    # 'CouponDiscountAmt_LAG_6_POLY_2',
-    # 'CouponDiscountAmt_LAG_7_POLY_2',
-    # 'CouponDiscountAmt_LAG_8_POLY_2',
-    # 'CouponDiscountAmt_LAG_9_POLY_2',
-    # 'CouponDiscountAmt_LAG_10_POLY_2',
+    'CouponDiscountAmt^2_LAG_1',
+    'CouponDiscountAmt^2_LAG_2',
+    'CouponDiscountAmt^2_LAG_3',
+    'CouponDiscountAmt^2_LAG_4',
+    'CouponDiscountAmt^2_LAG_5',
     'Sellout_LAG_1',
     'Sellout_LAG_2',
     'Sellout_LAG_3',
     'Sellout_LAG_4',
     'Sellout_LAG_5',
-    # 'Sellout_LAG_6',
-    # 'Sellout_LAG_7',
-    # 'Sellout_LAG_8',
-    # 'Sellout_LAG_9',
-    # 'Sellout_LAG_10',
-    'Sellout_LAG_1_POLY_2',
-    'Sellout_LAG_2_POLY_2',
-    'Sellout_LAG_3_POLY_2',
-    'Sellout_LAG_4_POLY_2',
-    'Sellout_LAG_5_POLY_2', 
-    # 'Sellout_LAG_6_POLY_2', 
-    # 'Sellout_LAG_7_POLY_2',
-    # 'Sellout_LAG_8_POLY_2', 
-    # 'Sellout_LAG_9_POLY_2', 
-    # 'Sellout_LAG_10_POLY_2',
+    'Sellout^2_LAG_1',
+    'Sellout^2_LAG_2',
+    'Sellout^2_LAG_3',
+    'Sellout^2_LAG_4',
+    'Sellout^2_LAG_5',
 ]
-
+order_detail_sorted[["season", "Sellout"]].groupby("season").mean()
+df.columns
 target_col = 'Sellout'
 features = df[feat_cols]
+features = features.fillna(0)
 target = df[target_col]
 target_online = df.ForwardOnline
 target_digitalizacion = df.Digitalizacion
@@ -258,68 +259,70 @@ def get_indexes(feat_cols, col_name):
 
 
 start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")
+
 # Llamada a la función con la lista feat_cols
 
-df['DayCount']=df['DayCount'].fillna(0)
+df['DayCount'] = df['DayCount'].fillna(0)
 na_counts = features.isna().sum()
 na_columns = na_counts[na_counts > 0]
 na_columns
 
 # MAGIC ### Ajuste Sample_weight para desbalanceo de muestras
-pedidos_con_cupon = order_detail_sorted[order_detail_sorted['CouponDescription'] != 'NoCupon']['Code'].value_counts()
-pedidos_sin_cupon = order_detail_sorted[order_detail_sorted['CouponDescription'] == 'NoCupon']['Code'].value_counts()
+# pedidos_con_cupon = \
+#     order_detail_sorted[order_detail_sorted['NormalizedCoupon'] != 'No cupón']['Code'] \
+#     .value_counts()
+# pedidos_sin_cupon = \
+#     order_detail_sorted[order_detail_sorted['NormalizedCoupon'] == 'No cupón']['Code'] \
+#     .value_counts()
 
 # Calcular número de pedidos con y sin cupon
-n_with_coupon = len(pedidos_con_cupon)
-n_no_coupon = len(pedidos_sin_cupon)
-weight_no_coupon = 1
-weight_with_coupon = n_no_coupon / n_with_coupon
+# n_with_coupon = len(pedidos_con_cupon)
+# n_no_coupon = len(pedidos_sin_cupon)
+# weight_no_coupon = 1
+# weight_with_coupon =  n_no_coupon / n_with_coupon
 
-
-#Creación del array de pesos
-feature_balance=features['CouponDiscountAmt']
-sample_weight = np.where(feature_balance == 0,
-                         weight_no_coupon,
-                         weight_with_coupon)
-
+# #Creación del array de pesos
+# feature_balance = features[coupon_cols + coupon_poly_cols].apply(
+#     lambda x: 0 < x.sum(), axis= 1
+# )
+# feature_balance.sum()
+# feature_balance.shape
+# sample_weight = np.where(feature_balance,
+#                          weight_with_coupon,                         
+#                          weight_no_coupon,)
+# sample_weight
 # MAGIC ####Aplicación del modelo y entrenamiento
 
 #FIT MODELO SIN PESOS
 model_no_weight = BayesianRidge(fit_intercept=False)
 model_no_weight.fit(features, target)
-model_no_weight.coef_[start_index:end_index]
+for z in zip(feat_cols, model_no_weight.coef_):
+    print(z)
+#model_no_weight.coef_[start_index:end_index]
 model_no_weight.coef_[start_index:(start_index+6)].sum()
+
+y_pred = model_no_weight.predict(features)
+y_pred[y_pred < 0].shape
+plt.scatter(y_pred, target)
+plt.savefig("plots/errors.jpg")
+plt.close()
+target
 
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)
 ardr.coef_[start_index:end_index]
-modelo_digitalizacion = BayesianRidge()
-modelo_digitalizacion.fit(features.iloc[:, start_index:end_index], target_digitalizacion)
-modelo_digitalizacion.coef_
-np.diag(modelo_digitalizacion.sigma_)
-np.diag(modelo_digitalizacion.sigma_)[start_index:end_index]
-nb = GaussianNB()
-nb.fit(features.iloc[:, start_index:end_index], target_online)
-sgdc = SGDClassifier(fit_intercept=True, loss="log_loss")
-sgdc.fit(features, target_online)
-sgdc.predict_log_proba(features)
-online_predict = nb.predict(features.iloc[:, start_index:end_index])
-target_online
-online_predict
-df[target_online & np.vectorize(lambda x: not x)(online_predict)].CouponDiscountAmt
-online_predict
-
-model_no_weight.coef_[start_index:end_index]
-ardr.coef_[start_index:end_index]
-model_no_weight.coef_[start_index:end_index]
 
 df['Sellout'].sum()
-investment = df[df.year==2023]['CouponDiscountAmt'].sum()
+df.year = df.OrderDate.apply(lambda x: x.year)
+investment = df[df.year == 2023]['CouponDiscountAmt'].sum()
+df.CouponDiscountAmt.describe()
 print(investment)
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
+np.dot(features.iloc[:, start_index:end_index][(df.year == 2023)],
        model_no_weight.coef_[start_index:end_index],
        ).sum()
-
+df.CouponDiscountAmt[df.CouponDiscountAmt>0].describe()
+df.CouponDiscountAmt[df.CouponDiscountAmt>70].describe()
+features.iloc[:, start_index:end_index]
 returns = []
 for k in range(600):
     c = np.random.normal(
@@ -334,7 +337,7 @@ plt.hist(returns, bins=30, density=True,
 plt.title("Retorno de la inversión en cupones")
 plt.xlabel("Retorno porcentual")
 plt.ylabel("Frequencia")
-plt.savefig("plots/returns.jpg")
+plt.savefig("plots/returns_total.jpg")
 plt.close()
 
 coef_cupones_2 = model_no_weight.coef_[start_index:(start_index + 6)]
@@ -364,16 +367,6 @@ plt.ylabel('Valor del Coeficiente')
 plt.xticks(range(len(coef_cupones_2)))
 plt.savefig("plots/coeficiente_2.jpg")
 plt.close()
-
-    
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023)],
-       model_no_weight.coef_[start_index:end_index]).sum()
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
-                                               (df.CouponDiscountAmt < 20)],
-       model_no_weight.coef_[start_index:end_index]).sum()
-np.dot(features.iloc[:, start_index:end_index][(df.year==2023) &
-                                               (df.CouponDiscountAmt >= 20)],
-       model_no_weight.coef_[start_index:end_index]).sum()
 
 
 def fit_model(features, target, target_digitalizacion):
@@ -462,7 +455,7 @@ def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, 
     
 make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2,
                  "Digitalizacion", False, True)
-make_simulations("Modelo General", model_no_weight, 76)
+make_simulations("Modelo General", model_no_weight, 60)
 make_probability_plot("Modelo probabilidad digitalizacion", nb)
 
 indices = {"fixed": fixed_model_index, "pct": pct_model_index}
