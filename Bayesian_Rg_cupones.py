@@ -73,6 +73,7 @@ def get_season(mes):
 
 order_detail_sorted = \
     pd.read_parquet("data/order_detail_sorted_normalizado.parquet")
+
 order_detail_sorted = order_detail_sorted[
     ~order_detail_sorted.NameDistributor.isin(['Voldis Baleares', 'Ceres'])]
 check = order_detail_sorted[["PointOfSaleId", "NameDistributor"]] \
@@ -88,6 +89,7 @@ multiples_distribuidores = distribuidores_por_pdv[distribuidores_por_pdv['NameDi
 multiples_distribuidores
 
 order_detail_sorted = order_detail_sorted[order_detail_sorted.Sellout < 2000]
+order_detail_sorted = order_detail_sorted[0 < order_detail_sorted.Sellout]
 
 order_detail_sorted = \
     order_detail_sorted.sort_values(by="OrderDate", ascending=True)
