@@ -6,46 +6,46 @@ import pickle
 
 
 # Leer datos
-maestro_cliente_path = r'C:\Users\ctrujils\Downloads\maestro_cliente_final_12UM.parquet'
+maestro_cliente_path = r'C:\Users\ctrujils\maestro_cliente_final_segmentado.parquet'
 maestro_clientes = pd.read_parquet(maestro_cliente_path)
 
 
 #### AGREGAMOS CLUSTER 1,2,3,Y 0
 
-with open('cluster_dict_by_company_release_1.pickle', 'rb') as file:
-    segmentacion = pickle.load(file)
+# with open('cluster_dict_by_company_release_1.pickle', 'rb') as file:
+#     segmentacion = pickle.load(file)
 
-data = []
+# data = []
 
-# Iterar sobre cada clave del diccionario (los números como '1', '4', '5', etc.)
-for cluster, sub_dict in segmentacion.items():
-    # Añadir cada PointOfSaleId y su respectivo cluster como tupla (id, cluster)
-    for point_of_sale_id, cluster_value in sub_dict.items():
-        data.append((point_of_sale_id, cluster_value))
+# # Iterar sobre cada clave del diccionario (los números como '1', '4', '5', etc.)
+# for cluster, sub_dict in segmentacion.items():
+#     # Añadir cada PointOfSaleId y su respectivo cluster como tupla (id, cluster)
+#     for point_of_sale_id, cluster_value in sub_dict.items():
+#         data.append((point_of_sale_id, cluster_value))
 
-# Convertir la lista de tuplas en un DataFrame
-order_detail_sorted_cluster = pd.DataFrame(data, columns=['company_id', 'Cluster'])
-
-
-maestro_clientes=pd.merge(maestro_clientes,order_detail_sorted_cluster, on='company_id', how='left')
+# # Convertir la lista de tuplas en un DataFrame
+# order_detail_sorted_cluster = pd.DataFrame(data, columns=['company_id', 'Cluster'])
 
 
-
-# # # Guardar archivo final
-save_path = r'C:\Users\ctrujils\maestro_clientes_12UM_cluster.parquet'
-maestro_clientes.to_parquet(save_path, index=False)
+# maestro_clientes=pd.merge(maestro_clientes,order_detail_sorted_cluster, on='company_id', how='left')
 
 
 
+# # # # Guardar archivo final
+# save_path = r'C:\Users\ctrujils\maestro_clientes_12UM_cluster.parquet'
+# maestro_clientes.to_parquet(save_path, index=False)
 
 
-path = r'C:\Users\ctrujils\order_detail_sorted_normalizado.parquet'
+
+
+
+path = r'C:\Users\ctrujils\Downloads\order_detail_total.parquet'
 order_detail = pd.read_parquet(path)
 
 
 # print(order_detail.head())
-# Filtrar devoluciones 
-# order_detail = order_detail[order_detail['TotalOrderQuantity'] > 0]
+# Filtrar devoluciones
+order_detail = order_detail[order_detail['TotalOrderQuantity'] > 0]
 
 
 
@@ -102,15 +102,15 @@ def classification_origin(row):
 
 order_detail_sorted['Origin'] = order_detail_sorted.apply(classification_origin, axis=1)
 
-maestro_clientes = maestro_clientes[['tipologia', 'Cluster','abc','company_id']]
-order_detail_sorted = pd.merge(order_detail_sorted, maestro_clientes, left_on='PointOfSaleId', right_on='company_id', how='left')
-order_detail_sorted.drop(columns='company_id', inplace=True)
-order_detail_sorted['tipologia'] = order_detail_sorted['tipologia'].fillna('No Segmentado')
+# maestro_clientes = maestro_clientes[['tipologia', 'Cluster','abc','company_id']]
+# order_detail_sorted = pd.merge(order_detail_sorted, maestro_clientes, left_on='PointOfSaleId', right_on='company_id', how='left')
+# order_detail_sorted.drop(columns='company_id', inplace=True)
+# order_detail_sorted['tipologia'] = order_detail_sorted['tipologia'].fillna('No Segmentado')
 
 # Limpieza de datos
 order_detail_sorted = order_detail_sorted[['Code', 'OrderDate', 'Sellout','CodeProduct','Name', 'NameDistributor', 
                                            'PointOfSaleId', 'CouponCode', 'CouponDiscountAmt', 'CouponDiscountPct', 
-                                           'CouponDescription', 'InsertionOrigin', 'Origin', 'tipologia','Cluster','abc']]
+                                           'CouponDescription', 'InsertionOrigin', 'Origin']]
 
 order_detail_sorted['NameDistributor'] = order_detail_sorted['NameDistributor'].apply(lambda x: x.replace(' BC', '').title())
 
@@ -201,10 +201,10 @@ order_detail_sorted['CouponDiscountAmt'] = order_detail_sorted['CouponDiscountAm
 order_detail_sorted['CouponDiscountPct'] = pd.to_numeric(order_detail_sorted['CouponDiscountPct'], errors='coerce')
 
 def clasificar_descuento(row):
-    if pd.notna(row['CouponDiscountAmt']) and pd.notna(row['CouponDiscountPct']) and pd.notna(row['CouponCode']):
+    if pd.notna(row['CouponDiscountAmt']) and pd.notna(row['CouponDiscountPct']) and pd.notna(row['NormalizedCoupon']):
         if row['CouponDiscountAmt'] != 0 and row['CouponDiscountPct'] == 0:
             return 'Fijo'
-        elif row['CouponDiscountPct'] != 0 and row['CouponCode'] != 0:
+        elif row['CouponDiscountPct'] != 0 and row['NormalizedCoupon'] != 0:
             return 'Porcentual'
     return 'NoCupon'
 
@@ -219,7 +219,9 @@ order_detail_sorted['Coupon_type'] = order_detail_sorted.apply(clasificar_descue
 # print(order_detail_sorted[order_detail_sorted["Origin"] == "OFFLINE"]['PointOfSaleId'])
 
 order_detail_sorted['CouponCode'] = order_detail_sorted['CouponCode'].replace(['', 'None', '0', '0.0', '0.00', 'NaN', 0], np.nan)
-sales_coupon = order_detail_sorted[order_detail_sorted['CouponCode'].notna()].groupby('PointOfSaleId')['Sellout'].sum()
+
+
+sales_coupon = order_detail_sorted[order_detail_sorted['NormalizedCoupon'] != 'No cupón'].groupby('PointOfSaleId')['Sellout'].sum()
 total_sales = order_detail_sorted.groupby('PointOfSaleId')['Sellout'].sum()
 pctg_coupon_used = (sales_coupon / total_sales) * 100 
 pctg_coupon_used_order_detail_sorted = pctg_coupon_used.reset_index(name='PctgCouponUsed')
@@ -262,6 +264,13 @@ order_detail_sorted['LastPurchaseOnline'] = order_detail_sorted.groupby(['PointO
 order_detail_sorted['LastPurchaseOnline'] = order_detail_sorted['LastPurchaseOnline'].fillna(False).astype(bool)
 
 
+
+
+
+distribuidores_por_pdv = order_detail_sorted.groupby('PointOfSaleId')['NameDistributor'].nunique().reset_index()
+multiples_distribuidores = distribuidores_por_pdv[distribuidores_por_pdv['NameDistributor'] > 1]
+order_detail_sorted = order_detail_sorted[~order_detail_sorted['PointOfSaleId'].isin(multiples_distribuidores['PointOfSaleId'])]
+
 ## CREACIÓN DE LA VARIABLE TARGET
 
 gt = order_detail_sorted.groupby(['NameDistributor', 'PointOfSaleId'])
@@ -284,7 +293,7 @@ list(gt)[0][1][["OrderDate", "IsOnline"]] \
 
 
 for _, g in gt:
-    g["Digitalizacion"] = g.IsOnline.rolling(10, min_periods=1).sum()
+    g["Digitalizacion"] = g.IsOnline.rolling(5, min_periods=1).sum()
     g["ForwardOnline"] = g.IsOnline \
                            .iloc[::-1].rolling(5, min_periods=0).sum().iloc[::-1] \
                            .apply(lambda x: x > 0)
@@ -292,7 +301,12 @@ for _, g in gt:
 
 order_detail_sorted = pd.concat(digitalizacion)
 
+#Eliminamos pedidos vacíos
+order_detail_sorted = order_detail_sorted[order_detail_sorted['Code'].str.strip() != '']
 
+
+
+print('ya')
 # # # # Guardar archivo final
 # save_path = r'C:\Users\ctrujils\order_detail_sorted_v2.parquet'
 # order_detail_sorted.to_parquet(save_path, index=False)
