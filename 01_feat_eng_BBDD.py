@@ -50,6 +50,7 @@ order_detail = order_detail[order_detail['TotalOrderQuantity'] > 0]
 
 
 
+
 # Feature Engineering
 order_detail['CouponCode'] = order_detail['CouponCode'].replace('', 0).fillna(0)
 order_detail['CouponDiscountPct'] = order_detail['CouponDiscountPct'].replace([None, ''], 0).astype(float)
@@ -218,6 +219,8 @@ order_detail_sorted['Coupon_type'] = order_detail_sorted.apply(clasificar_descue
 # Recurrencia a la compra de cupones
 # print(order_detail_sorted[order_detail_sorted["Origin"] == "OFFLINE"]['PointOfSaleId'])
 
+order_detail_sorted=order_detail_sorted[order_detail_sorted['Sellout']>0]
+
 order_detail_sorted['CouponCode'] = order_detail_sorted['CouponCode'].replace(['', 'None', '0', '0.0', '0.00', 'NaN', 0], np.nan)
 
 
@@ -228,6 +231,7 @@ pctg_coupon_used_order_detail_sorted = pctg_coupon_used.reset_index(name='PctgCo
 
 order_detail_sorted = order_detail_sorted.merge(pctg_coupon_used_order_detail_sorted, on='PointOfSaleId', how='left')
 order_detail_sorted['PctgCouponUsed'] = order_detail_sorted['PctgCouponUsed'].fillna(0)
+
 
 
 #Dias transcurridos desde la ultima compra online (acumulado)
@@ -254,16 +258,12 @@ num_filas_despues = order_detail_sorted.shape[0]
 assert num_filas_antes == num_filas_despues, f"El número de filas cambió después del merge: antes={num_filas_antes}, después={num_filas_despues}"
 
 
-
-
 # Booleana de ultima compra online
 
 order_detail_sorted = order_detail_sorted.sort_values(by=['PointOfSaleId', 'NameDistributor', 'OrderDate'])
 order_detail_sorted['IsOnline'] = order_detail_sorted['Origin'] == 'Online'
 order_detail_sorted['LastPurchaseOnline'] = order_detail_sorted.groupby(['PointOfSaleId', 'NameDistributor'])['IsOnline'].shift(1)
 order_detail_sorted['LastPurchaseOnline'] = order_detail_sorted['LastPurchaseOnline'].fillna(False).astype(bool)
-
-
 
 
 
