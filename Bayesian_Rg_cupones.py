@@ -1,6 +1,7 @@
 # En este notebook desarrolaremos un modelo de regresión (Bayessian Ridge)
 import pandas as pd
-from sklearn.linear_model import BayesianRidge, ARDRegression, SGDClassifier
+from sklearn.linear_model import LinearRegression, BayesianRidge, ARDRegression, SGDClassifier
+from sklearn.decomposition import PCA
 from sklearn.naive_bayes import GaussianNB
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ from returns import pipeline, unsafe
 import asyncio
 # import mlflow.pyfunc
 import itertools as it
+import pickle
 # import numpy as np
 
 # config = iou.read_config()
@@ -239,6 +241,8 @@ feat_cols = [
 ]
 order_detail_sorted[["season", "Sellout"]].groupby("season").mean()
 df.columns
+df.to_parquet("data/df_modelo.parquet")
+
 target_col = 'Sellout'
 features = df[feat_cols]
 features = features.fillna(0)
@@ -298,6 +302,9 @@ na_columns
 #FIT MODELO SIN PESOS
 model_no_weight = BayesianRidge(fit_intercept=False)
 model_no_weight.fit(features, target)
+with open('modelo_general.pkl', 'wb') as file:
+    pickle.dump(model_no_weight, file)
+    
 for z in zip(feat_cols, model_no_weight.coef_):
     print(z)
 #model_no_weight.coef_[start_index:end_index]
@@ -308,7 +315,6 @@ y_pred[y_pred < 0].shape
 plt.scatter(y_pred, target)
 plt.savefig("plots/errors.jpg")
 plt.close()
-target
 
 ardr = ARDRegression(fit_intercept=False)
 ardr.fit(features, target)
@@ -317,14 +323,12 @@ ardr.coef_[start_index:end_index]
 df['Sellout'].sum()
 df.year = df.OrderDate.apply(lambda x: x.year)
 investment = df[df.year == 2023]['CouponDiscountAmt'].sum()
-df.CouponDiscountAmt.describe()
-print(investment)
-np.dot(features.iloc[:, start_index:end_index][(df.year == 2023)],
+returns = np.dot(features.iloc[:, start_index:end_index][(df.year == 2023)],
        model_no_weight.coef_[start_index:end_index],
        ).sum()
-df.CouponDiscountAmt[df.CouponDiscountAmt>0].describe()
-df.CouponDiscountAmt[df.CouponDiscountAmt>70].describe()
-features.iloc[:, start_index:end_index]
+print(investment)
+print(returns)
+
 returns = []
 for k in range(600):
     c = np.random.normal(
@@ -345,6 +349,62 @@ plt.close()
 coef_cupones_2 = model_no_weight.coef_[start_index:(start_index + 6)]
 coef_cupones_2
 
+counts = df[["PointOfSaleId", "Sellout"]].groupby("PointOfSaleId") \
+                                         .count().sort_values("Sellout", ascending=False).reset_index()
+counts.columns = ["PointOfSaleId", "NumOrders"]
+pdvs = counts.to_dict("records")
+#lista para los modos_pdvs
+modelos_pdv = []
+coefs_pdv = []
+
+for pdv in pdvs:
+    print(pdv)
+
+    df_pdv=df[df['PointOfSaleId']== pdv["PointOfSaleId"]].reset_index(drop=True, inplace=False)
+    x_pdv=df_pdv[feat_cols]
+    y_pdv=df_pdv[target_col]
+    y_pred_general_pdv=model_no_weight.predict(x_pdv)
+    x_to_train = pd.concat([x_pdv,x_pdv])
+    x_to_train = x_to_train[x_to_train.columns[start_index:end_index]]
+    y_to_train = pd.concat([y_pdv,pd.DataFrame({"Sellout": y_pred_general_pdv})],axis=0)
+
+    modelo_pdv = BayesianRidge(fit_intercept=False)
+    weights = ([pdv["NumOrders"]] * pdv["NumOrders"]) + ([20] * pdv["NumOrders"])
+    modelo_pdv.fit(x_to_train, y_to_train.Sellout, weights)
+        # modelo_pdv.fit(x_pdv, y_pdv)        
+        # print(modelo_pdv.coef_[start_index:end_index])
+        # print("-" * 100)
+    coefs_pdv.append(
+        [pdv["PointOfSaleId"], pdv["NumOrders"]] + list(modelo_pdv.coef_))
+    modelo_info = {
+        'pdv': pdv,
+        'modelo': modelo_pdv
+    }
+    # Agregar el diccionario a la lista de modelos
+    modelos_pdv.append(modelo_info)
+
+# Guardar la lista de diccionarios
+with open('submodelos_pdv_2.pkl', 'wb') as file:
+    pickle.dump(modelos_pdv, file)
+len(coefs_pdv[0])
+coef_df = pd.DataFrame(coefs_pdv)
+coef_df.columns = \
+    ["PointOfSaleId", "NumOrders"] + features.columns[start_index:end_index].tolist()
+coef_df
+cols_interesantes = features.columns[start_index:end_index].tolist()
+
+pca = PCA(n_components=2)  
+pca_result = pca.fit_transform(coef_df[cols_interesantes])
+pca_result
+# Crear un DataFrame con los resultados de PCA
+df_pca = pd.concat([
+    coef_df,
+    pd.DataFrame(data=pca_result, columns=['PC1', 'PC2'])], axis=1)
+df_pca = df_pca.sort_values("PC1", ascending=False)
+df_pca[["PointOfSaleId", "NumOrders", "PC1", "CouponDiscountAmt"]]
+df_pca.to_parquet("data/pca_coefs_2.parquet")
+df_pca.to_csv("data/pca_coefs_2.csv", sep=";", decimal=",")
+
 
 def plot_coefs(coefs, model_name):
     plt.bar(range(len(coefs)), coefs,
@@ -361,24 +421,13 @@ def plot_coefs(coefs, model_name):
 
 plot_coefs(coef_cupones_2, "modelo_general")
 
-coef_cupones_2 = model_no_weight.coef_[(start_index + 11):end_index]
-plt.bar(range(len(coef_cupones_2)), coef_cupones_2, color='skyblue', edgecolor='black')
-plt.title('Coeficientes cuadráticos del Modelo')
-plt.xlabel('Índice del Coeficiente')
-plt.ylabel('Valor del Coeficiente')
-plt.xticks(range(len(coef_cupones_2)))
-plt.savefig("plots/coeficiente_2.jpg")
-plt.close()
-
 
 def fit_model(features, target, target_digitalizacion):
     model = BayesianRidge(fit_intercept=False)
     model.fit(features, target)
     ardr = ARDRegression(fit_intercept=False)
     ardr.fit(features, target)
-    modelo_digitalizacion = BayesianRidge(fit_intercept=False)
-    modelo_digitalizacion.fit(features, target_digitalizacion)    
-    return model, ardr, modelo_digitalizacion
+    return model, ardr
 
 
 def generate_data_for_simulation(num_lags, coupon_level, poly_grade):
@@ -453,47 +502,6 @@ def make_simulations(model_name, model, levels, y_label="Retornos", diffs=True, 
 
         labels = [i for i in [k for k in range(2, levels, 2)]]
         make_plot(f"{model_name} diffs", results_por_diff, labels, y_label)
-    
-    
-make_simulations("Modelo digitalizacion General", modelo_digitalizacion, 2,
-                 "Digitalizacion", False, True)
+
+        
 make_simulations("Modelo General", model_no_weight, 60)
-make_probability_plot("Modelo probabilidad digitalizacion", nb)
-
-indices = {"fixed": fixed_model_index, "pct": pct_model_index}
-for k in indices:
-    f = features[indices[k]]
-    t = target[indices[k]]
-    td = target_digitalizacion[indices[k]]
-    br, ardr, md = fit_model(f, t, td)
-    print(br.coef_[start_index:(start_index+6)].sum())
-    make_simulations(f"Modelo digitalizacion {k}", md, 2,
-                     "Digitalizacion", False)
-    make_simulations(f"Modelo general {k}", br, 76)
-    plot_coefs(br.coef_[start_index:(start_index+6)], k)
-
-years = [2023, 2024]
-tipologias = [c for c in features.columns if c.startswith("Tip")
-              if c not in ["Tip_Tap room", 'Tip_Restaurante de Imagen con Tapeo']]
-
-# for colname in tipologias:
-#     f = features[features[colname]]
-#     t = target[features[colname]]
-#     to = target_online[features[colname]]
-#     br, ardr, nb = fit_model(f, t, to)
-#     try:
-#         make_simulations(f"Modelo {colname}", br, 22)
-#         make_probability_plot(f"Modelo General {colname}", nb)                    
-#     except Exception as e:
-#         print(e)
-#     for y in years:
-#         try:
-#             ft = features[features[colname] & (df.year == y)]
-#             tt = target[features[colname] & (df.year == y)]
-#             tto = target_online[features[colname] & (df.year == y)]
-#             br, ardr, nb = fit_model(ft, tt, tto)
-#             make_simulations(f"Modelo {colname} {y}", br, 22)
-#             make_probability_plot(f"Probabilidad Online {colname} {y}", nb)            
-#         except Exception as e:
-#             print(e)
-            
