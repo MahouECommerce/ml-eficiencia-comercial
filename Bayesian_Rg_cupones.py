@@ -75,6 +75,11 @@ def get_season(mes):
 
 order_detail_sorted = \
     pd.read_parquet("data/order_detail_sorted_normalizado.parquet")
+order_detail_sorted.year = order_detail_sorted.OrderDate.apply(lambda x: x.year)
+order_detail_sorted = order_detail_sorted[order_detail_sorted.year > 2022]
+
+order_detail_sorted.CouponDiscountAmt[order_detail_sorted.CouponDiscountAmt > 0].mean()
+order_detail_sorted.CouponDiscountAmt[order_detail_sorted.CouponDiscountAmt > 0].mean()
 
 order_detail_sorted = order_detail_sorted[
     ~order_detail_sorted.NameDistributor.isin(['Voldis Baleares', 'Ceres'])]
@@ -322,7 +327,11 @@ ardr.coef_[start_index:end_index]
 
 df['Sellout'].sum()
 df.year = df.OrderDate.apply(lambda x: x.year)
-investment = df[df.year == 2023]['CouponDiscountAmt'].sum()
+investment = \
+    order_detail_sorted[order_detail_sorted.OrderDate.apply(
+        lambda x: x.year == 2023)].CouponDiscountAmt.sum()
+investment
+investment = df[df.year == 2023]['CouponDiscountAmt'].sum() + 40000
 returns = np.dot(features.iloc[:, start_index:end_index][(df.year == 2023)],
        model_no_weight.coef_[start_index:end_index],
        ).sum()
@@ -420,7 +429,9 @@ def plot_coefs(coefs, model_name):
 
 
 plot_coefs(coef_cupones_2, "modelo_general")
-
+coef_cupones_2[1:].mean()
+coef_cupones_2.sum()
+coef_cupones_2
 
 def fit_model(features, target, target_digitalizacion):
     model = BayesianRidge(fit_intercept=False)
