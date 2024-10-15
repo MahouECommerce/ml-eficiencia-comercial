@@ -1,4 +1,4 @@
-# Importar librerías
+# Importar libreríascolumns = order_detail_sorted
 import pandas as pd
 import numpy as np
 import pickle
@@ -225,12 +225,16 @@ order_detail_sorted['CouponCode'] = order_detail_sorted['CouponCode'].replace(['
 
 
 sales_coupon = order_detail_sorted[order_detail_sorted['NormalizedCoupon'] != 'No cupón'].groupby('PointOfSaleId')['Sellout'].sum()
-total_sales = order_detail_sorted.groupby('PointOfSaleId')['Sellout'].sum()
-pctg_coupon_used = (sales_coupon / total_sales) * 100 
+sales_online = order_detail_sorted[order_detail_sorted['Origin'] == 'Online'].groupby('PointOfSaleId')['Sellout'].sum()
+pctg_coupon_used = (sales_coupon / sales_online) * 100
 pctg_coupon_used_order_detail_sorted = pctg_coupon_used.reset_index(name='PctgCouponUsed')
+
 
 order_detail_sorted = order_detail_sorted.merge(pctg_coupon_used_order_detail_sorted, on='PointOfSaleId', how='left')
 order_detail_sorted['PctgCouponUsed'] = order_detail_sorted['PctgCouponUsed'].fillna(0)
+
+duplicados = pctg_coupon_used_order_detail_sorted['PointOfSaleId'].duplicated().any()
+print(f"Hay duplicados: {duplicados}")
 
 
 
