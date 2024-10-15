@@ -2,15 +2,19 @@ import pandas as pd
 import pickle
 import numpy as np
 from simulation_utils import get_indexes, feat_cols
+from sklearn.linear_model import BayesianRidge
 
-correction = 40000
+# feat_cols = [c for c in feat_cols if c != "Orig_OFFLINE"]
+
+# correction = 40000
 
 
 def compute_returns(df, model):
     start_index, end_index = get_indexes(feat_cols, "CouponDiscountAmt")
     df.year = df.OrderDate.apply(lambda x: x.year)
-    # investment = df[df.year == 2023]['CouponDiscountAmt'].sum()
-    investment = df['CouponDiscountAmt'].sum()
+    investment = df[df.year == 2023]['CouponDiscountAmt'].sum()
+    # investment = df['CouponDiscountAmt'].sum()
+    # investment = 575810.43
     discount_mean = df['CouponDiscountAmt'].mean()
     print(discount_mean)
     print(investment)
@@ -49,14 +53,16 @@ grupos = [
     {"nombre": "optimos", "df": optimos},
 ]
 
-df = pd.read_parquet("data/df_modelo.parquet")
+df = pd.read_parquet("data/df_modelo_online.parquet")
 df.CouponDiscountAmt.sum()
-with open("modelo_general.pkl", "rb") as f:
+with open("modelo_general_online.pkl", "rb") as f:
     modelo_general = pickle.load(f)
 
 for g in grupos:
     print(g["nombre"])
     gdf = df[df.PointOfSaleId.isin(g["df"].tolist())]
+    br = BayesianRidge(fit_intercept=False)
+    br.fit(gdf[feat_cols], gdf.Sellout)
     print(gdf.shape)
-    returns = compute_returns(gdf, modelo_general)
+    returns = compute_returns(gdf, br)
     print(np.quantile(np.array(returns), [0.05, 0.5, 0.95]))
