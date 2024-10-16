@@ -1,9 +1,10 @@
 import pandas as pd
 import pickle
+import warnings
 import numpy as np
 from simulation_utils import get_indexes, feat_cols
 from sklearn.linear_model import BayesianRidge
-Warnings_ignore = True
+warnings.filterwarnings('ignore')
 
 # feat_cols = [c for c in feat_cols if c != "Orig_OFFLINE"]
 
@@ -127,27 +128,72 @@ grupos = [{"nombre": key, "df": df_filtrados[key]['PointOfSaleId']} for key in d
 
 
 
+import matplotlib.pyplot as plt
+
+# Crear listas para almacenar los resultados
+grupo_nombres = []
+cupon_medio_list = []
+cuantiles_list = []
+
 for g in grupos:
-    # print(g["nombre"])
     
-    # Convertir el contenido de 'df' a una lista de PointOfSaleId
     gdf_ids = g["df"].tolist() if not g["df"].empty else []
     
-    # Filtrar el DataFrame original con los PointOfSaleId del grupo actual
     gdf = df[df['PointOfSaleId'].isin(gdf_ids)]
     
-    # Comprobar si el DataFrame tiene suficientes muestras para entrenar
+    
     if gdf.shape[0] == 0:
-        # print(f"El grupo '{g['nombre']}' no tiene suficientes datos para entrenar el modelo. Se omite.")
         continue
 
-    # Entrenar el modelo BayesianRidge con el grupo actual
+    
     br = BayesianRidge(fit_intercept=False)
     br.fit(gdf[feat_cols], gdf['Sellout'])
     # print(f"Tamaño del grupo '{g['nombre']}': {gdf.shape}")
     
+    # Calcular y almacenar el cupón medio
+    cupon_medio = gdf['CouponDiscountAmt'].mean()
+    cupon_medio_list.append(cupon_medio)
+    grupo_nombres.append(g['nombre'])
+    
     # Calcular y mostrar los retornos
     returns = compute_returns(gdf, br)
-    print(f"Cuantiles de los retornos para el grupo {g['nombre']}: {np.quantile(np.array(returns), [0.05, 0.5, 0.95])}")
+    cuantiles = np.quantile(np.array(returns), [0.05, 0.5, 0.95])
+    cuantiles_list.append(cuantiles)
+    print(f"Cuantiles de los retornos para el grupo {g['nombre']}: {cuantiles}")
+
+# Crear DataFrame para visualizar los resultados
+import pandas as pd
+resultados_df = pd.DataFrame({
+    'Grupo': grupo_nombres,
+    'Cupon_Medio': cupon_medio_list,
+    'Cuantiles_5%': [cu[0] for cu in cuantiles_list],
+    'Cuantiles_50%': [cu[1] for cu in cuantiles_list],
+    'Cuantiles_95%': [cu[2] for cu in cuantiles_list]
+})
+
+
+# Graficar el cupón medio por grupo
+plt.figure(figsize=(10, 5))
+plt.bar(resultados_df['Grupo'], resultados_df['Cupon_Medio'], color='skyblue')
+plt.xlabel('Grupo')
+plt.ylabel('Cupón Medio')
+plt.title('Cupón Medio por Grupo')
+plt.xticks(rotation=45)
+plt.grid(axis='y')
+plt.show()
+
+# Graficar los cuantiles por grupo
+plt.figure(figsize=(12, 6))
+plt.plot(resultados_df['Grupo'], resultados_df['Cuantiles_5%'], label='5% Cuantil', marker='o', color='red')
+plt.plot(resultados_df['Grupo'], resultados_df['Cuantiles_50%'], label='50% Cuantil (Mediana)', marker='o', color='green')
+plt.plot(resultados_df['Grupo'], resultados_df['Cuantiles_95%'], label='95% Cuantil', marker='o', color='blue')
+plt.xlabel('Grupo')
+plt.ylabel('Retornos')
+plt.title('Distribución de los Cuantiles de los Retornos por Grupo')
+plt.legend()
+plt.xticks(rotation=45)
+plt.grid(axis='y')
+plt.show()
+
 
 print('fin')
