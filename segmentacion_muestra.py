@@ -17,8 +17,8 @@ order_detail_sorted = pd.read_parquet(path)
 order_detail_sorted = order_detail_sorted[~order_detail_sorted['NameDistributor'].isin([
                                                                                        'Voldis Baleares', 'Ceres'])]
 
+# FEATURE ENG
 
-#### CLIENTES ESPEJO #####
 order_detail_sorted = order_detail_sorted.sort_values(
     by='OrderDate', ascending=True)
 
@@ -27,7 +27,7 @@ frequency_total_per_pdv = order_detail_sorted.groupby(
     'PointOfSaleId').size().reset_index(name='FrequencyTotal')
 
 
-# FEATURE ENG
+
 order_detail_sorted['CodeProduct'] = order_detail_sorted['CodeProduct'].apply(
     lambda x: x[0] if isinstance(x, (list, np.ndarray)) else x)
 
@@ -72,10 +72,10 @@ order_detail_sorted['TotalOfflinePurchases'] = order_detail_sorted['TotalOffline
 
 
 #
-order_detail_sorted['AverageSelloutOnline'] = order_detail_sorted[order_detail_sorted['Origin']
-                                                                  == 'Online'].groupby('PointOfSaleId')['Sellout'].transform('mean')
-order_detail_sorted['AverageSelloutOffline'] = order_detail_sorted[order_detail_sorted['Origin']
-                                                                   != 'Online'].groupby('PointOfSaleId')['Sellout'].transform('mean')
+order_detail_sorted['AverageSelloutOnline'] = order_detail_sorted[order_detail_sorted['IsOnline']
+                                                                  == True].groupby('PointOfSaleId')['Sellout'].transform('mean')
+order_detail_sorted['AverageSelloutOffline'] = order_detail_sorted[order_detail_sorted['IsOnline']
+                                                                   == False].groupby('PointOfSaleId')['Sellout'].transform('mean')
 
 #
 order_detail_sorted['AverageSelloutOnline'] = order_detail_sorted['AverageSelloutOnline'].fillna(
@@ -83,18 +83,46 @@ order_detail_sorted['AverageSelloutOnline'] = order_detail_sorted['AverageSellou
 order_detail_sorted['AverageSelloutOffline'] = order_detail_sorted['AverageSelloutOffline'].fillna(
     0)
 
-#
-# order_detail_sorted['DaysSinceLastOfflinePurchase'] = (
-#     last_date -
-#     order_detail_sorted[order_detail_sorted['Origin'] != 'Online'].groupby('PointOfSaleId')['OrderDate'].transform('max')).dt.days
-# order_detail_sorted['DaysSinceLastOnlinePurchase'] = (
-#     last_date - order_detail_sorted[order_detail_sorted['Origin'] == 'Online'].groupby('PointOfSaleId')['OrderDate'].transform('max')).dt.days
 
-# #
-# order_detail_sorted['DaysSinceLastOfflinePurchase'] = order_detail_sorted['DaysSinceLastOfflinePurchase'].fillna(
-#     10000)
-# order_detail_sorted['DaysSinceLastOnlinePurchase'] = order_detail_sorted['DaysSinceLastOnlinePurchase'].fillna(
-#     10000)
+######### Análisis de cortes y ratios para determinar temporalidad de adopcionen la plataforma
+
+df_online = order_detail_sorted[order_detail_sorted['IsOnline'] == True]
+df_online = df_online.sort_values(by=['PointOfSaleId', 'OrderDate'])
+
+df_online_unique_dates = df_online.drop_duplicates(subset=['PointOfSaleId', 'OrderDate'], keep='first')
+
+df_online_unique_dates['DaysBetweenOnlinePurchases'] = df_online_unique_dates.groupby('PointOfSaleId')['OrderDate'].diff().dt.days
+
+
+def calculate_days_between_purchases(group):
+    group = group.sort_values(by='OrderDate')
+    days_between = group['OrderDate'].diff().dt.days
+    group['DaysBetweenFirstAndSecond'] = days_between.shift(-1) if len(days_between) > 1 else None
+    group['DaysBetweenSecondAndThird'] = days_between.shift(-2) if len(days_between) > 2 else None
+    return group
+
+
+df_online_unique_dates = df_online_unique_dates.groupby('PointOfSaleId').apply(calculate_days_between_purchases)
+
+
+days_between_dict = df_online_unique_dates.set_index(['PointOfSaleId', 'OrderDate'])[['DaysBetweenOnlinePurchases', 'DaysBetweenFirstAndSecond', 'DaysBetweenSecondAndThird']].to_dict(orient='index')
+
+order_detail_sorted['DaysBetweenOnlinePurchases'] = order_detail_sorted.set_index(['PointOfSaleId', 'OrderDate']).index.map(lambda x: days_between_dict.get(x, {}).get('DaysBetweenOnlinePurchases', 0))
+order_detail_sorted['DaysBetweenFirstAndSecond'] = order_detail_sorted.set_index(['PointOfSaleId', 'OrderDate']).index.map(lambda x: days_between_dict.get(x, {}).get('DaysBetweenFirstAndSecond', 0))
+order_detail_sorted['DaysBetweenSecondAndThird'] = order_detail_sorted.set_index(['PointOfSaleId', 'OrderDate']).index.map(lambda x: days_between_dict.get(x, {}).get('DaysBetweenSecondAndThird', 0))
+
+# Llenar NaN con ceros
+order_detail_sorted.fillna(0, inplace=True)
+
+
+
+
+
+# Verificar si hay valores NaN
+print(order_detail_sorted['DaysBetweenOnlinePurchases'].isna().sum())
+
+# Mostrar ejemplos específicos para verificar valores
+print(df_online_unique_dates[df_online_unique_dates['PointOfSaleId'] == 'CLI0020281'][['OrderDate', 'DaysBetweenOnlinePurchases']])
 
 
 # Obtener la última fecha de compra en el DataFrame general
@@ -132,8 +160,16 @@ order_detail_sorted['DaysSinceLastOfflinePurchase'] = (
     last_date - order_detail_sorted['LastOfflineOrderDate']
 ).dt.days
 
+def convert_object_to_string(df):
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].astype(str)
+    return df
 
+order_detail_sorted = convert_object_to_string(order_detail_sorted)
 
+path = r'C:\Users\ctrujils\order_detail_sorted_feat_eng.parquet'
+order_detail_sorted.to_parquet(path)
 
 
 # Columnas que ya están a nivel de PDV
@@ -147,7 +183,10 @@ cols_already_pdv_level = [
 # Columnas que requieren agregación (a nivel de pedido)
 cols_to_aggregate = {
     'PctgCouponUsed': 'mean',
+    'DaysBetweenOnlinePurchases': 'mean',
     'CouponDiscountAmt': 'sum', 
+    'DaysBetweenFirstAndSecond': 'mean',
+    'DaysBetweenSecondAndThird': 'mean',
     'Sellout': 'sum',  
     'Digitalizacion': 'mean'  
 }
@@ -165,7 +204,8 @@ order_detail_sorted_grouped = pd.merge(pdv_level_data, agg_df, on='PointOfSaleId
 # Ver el DataFrame final con los datos correctamente agregados a nivel de PDV
 print(order_detail_sorted_grouped)
 
-
+path=r'C:\Users\ctrujils\order_detail_sorted_grouped.parquet'
+order_detail_sorted_grouped.to_parquet(path)
 print('fin')
 
 # Segmento de CLIENTES OFFLINE
@@ -185,12 +225,17 @@ order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_g
 
 
 path= r'C:\Users\ctrujils\clientes_solo_offline.csv'
-# clientes_solo_offline.to_csv(path,
-#           sep=';',  # Delimitador
-#           decimal=',',  
-#           index=False,  
-#           float_format='%.2f',  # Formato para los valores decimales
-# )
+clientes_solo_offline.to_csv(path,
+          sep=';',  # Delimitador
+          decimal=',',  
+          index=False,  
+          float_format='%.2f',  # Formato para los valores decimales
+)
+
+
+path=r'C:\Users\ctrujils\order_detail_grouped_onine.parquet'
+order_detail_sorted_grouped.to_parquet(path)
+
 
 # Segmento de CLIENTES DORMIDOS
 # Definimos corte en base a la distribución
@@ -211,16 +256,16 @@ pdvs_dormidos = clientes_dormidos['PointOfSaleId'].unique().tolist()
 order_detail_sorted_dormidos = order_detail_sorted_grouped[order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_dormidos)]
 
 
-# path= r'C:\Users\ctrujils\clientes_dormidos.csv'
-# order_detail_sorted_dormidos.to_csv(path,
-#           sep=';',  # Delimitador
-#           decimal=',',  
-#           index=False,  
-#           float_format='%.2f')  # Formato para los valores decimales 
+
+path= r'C:\Users\ctrujils\clientes_dormidos.csv'
+order_detail_sorted_dormidos.to_csv(path,
+          sep=';',  # Delimitador
+          decimal=',',  
+          index=False,  
+          float_format='%.2f')  # Formato para los valores decimales 
 
 order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(
     pdvs_dormidos)]
-
 
 
 
@@ -230,19 +275,19 @@ print('fin')
 
 # Filtrar los clientes cuponeros: aquellos con todas sus compras online usando cupones
 
-clientes_cuponeros = order_detail_sorted_grouped[order_detail_sorted_grouped['PctgCouponUsed'] == 100]
+clientes_cuponeros = order_detail_sorted_grouped[order_detail_sorted_grouped['PctgCouponUsed'] >= 95 ]
 pdvs_cuponeros = clientes_cuponeros['PointOfSaleId'].unique().tolist()
 order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(
     pdvs_cuponeros)]
 
 
 
-# path= r'C:\Users\ctrujils\clientes_cuponeros.csv'
-# clientes_cuponeros.to_csv(path,
-#           sep=';',  # Delimitador
-#           decimal=',',  
-#           index=False,  
-#           float_format='%.2f')  # Formato para los valores decimales
+path= r'C:\Users\ctrujils\clientes_cuponeros.csv'
+clientes_cuponeros.to_csv(path,
+          sep=';',  # Delimitador
+          decimal=',',  
+          index=False,  
+          float_format='%.2f')  # Formato para los valores decimales
     
 
 
