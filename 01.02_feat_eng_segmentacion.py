@@ -63,8 +63,31 @@ order_detail_sorted['DaysSinceFirstPurchase'] = (
     - order_detail_sorted.groupby('PointOfSaleId')['OrderDate'].transform('min')).dt.days
 
 
+order_detail_sorted['OrderDate'] = pd.to_datetime(order_detail_sorted['OrderDate'])
+compras_online = order_detail_sorted[order_detail_sorted['Origin'] == 'Online']
+first_online_purchase_date = compras_online.groupby('PointOfSaleId')['OrderDate'].min().reset_index()
+first_online_purchase_date.rename(columns={'OrderDate': 'FirstOnlinePurchaseDate'}, inplace=True)
+order_detail_sorted = order_detail_sorted.merge(first_online_purchase_date, on='PointOfSaleId', how='left')
+
+order_detail_sorted['DaysSinceFirstOnlinePurchase'] = (
+    last_date - order_detail_sorted['FirstOnlinePurchaseDate']
+).dt.days
+
+### Caculamos frequency para ese periodo de adaptación
+
+ninety_days_ago = last_date - pd.Timedelta(days=90)
+compras_online_last_90 = order_detail_sorted[
+    (order_detail_sorted['Origin'] == 'Online') & 
+    (order_detail_sorted['OrderDate'] > ninety_days_ago)
+]
+
+frequency_online_last_90 = compras_online_last_90.groupby('PointOfSaleId').size().reset_index(name='frequency_online_last_90')
+order_detail_sorted = order_detail_sorted.merge(frequency_online_last_90, on='PointOfSaleId', how='left')
+
 total_online_purchases = order_detail_sorted[order_detail_sorted['IsOnline'] == True].groupby('PointOfSaleId').size().reset_index(name='TotalOnlinePurchases')
 total_offline_purchases = order_detail_sorted[order_detail_sorted['IsOnline'] == False].groupby('PointOfSaleId').size().reset_index(name='TotalOfflinePurchases')
+
+
 order_detail_sorted = order_detail_sorted.merge(total_online_purchases, on='PointOfSaleId', how='left')
 order_detail_sorted = order_detail_sorted.merge(total_offline_purchases, on='PointOfSaleId', how='left')
 order_detail_sorted['TotalOnlinePurchases'] = order_detail_sorted['TotalOnlinePurchases'].fillna(0)

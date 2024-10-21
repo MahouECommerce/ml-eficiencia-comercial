@@ -1,11 +1,23 @@
 
+import pandas as pd
+import numpy as np
+import itertools as it
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+# Cargar los datos
+
+path = r'C:\Users\ctrujils\order_detail_sorted_feat_eng.parquet'
+order_detail_sorted = pd.read_parquet(path)
+
+
 
 # Columnas que ya están a nivel de PDV
 cols_already_pdv_level = [
     'AverageSellout', 'DaysSinceLastPurchase', 'DaysSinceFirstPurchase', 
     'TotalOnlinePurchases', 'TotalOfflinePurchases', 'AverageSelloutOnline', 
     'AverageSelloutOffline', 'DaysSinceLastOfflinePurchase', 'DaysSinceLastOnlinePurchase','CumulativeAvgDaysBetweenPurchases','Frequency_online','FrequencyTotal',
-    'NumeroReferenciasUnicas','NameDistributor','Name'
+    'NumeroReferenciasUnicas','NameDistributor','Name', 'DaysSinceFirstOnlinePurchase'
 ]
 
 # Columnas que requieren agregación (a nivel de pedido)
@@ -39,30 +51,35 @@ print('fin')
 # Segmento de CLIENTES OFFLINE
 # Filtrar los clientes que tienen todas sus compras offline
 
-online_df=order_detail_sorted.loc[order_detail_sorted['Origin']=='Online']['PointOfSaleId'].drop_duplicates()
-clientes_solo_offline = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(online_df)]
+pdvs_online=order_detail_sorted.loc[order_detail_sorted['Origin']=='Online']['PointOfSaleId'].drop_duplicates()
+clientes_solo_offline = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_online)]
 
 pdvs_offline = clientes_solo_offline['PointOfSaleId'].unique().tolist()
 
-order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(
-    pdvs_offline)]
+order_detail_sorted_grouped['segmento'] = ''
+
+order_detail_sorted_grouped.loc[order_detail_sorted['PointOfSaleId'].isin(pdvs_offline), 'segmento']= 'Solo_Offline'
+
+
+# Segmento de CLIENTES NUEVOS
+
+#En base a lo que hemos analizado en el notebook 'Analisis_Segmentacion' nuestro periodo de observación para los pdvs nuevos son 90 días y/o más de tres compras
+
+df_online=order_detail_sorted_grouped[order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_online)]
+filtro_fijo=df_online[df_online['DaysSinceFirstOnlinePurchase'] <= 90]
+filtro_nuevos = filtro_fijo[
+    (filtro_fijo['DaysSinceFirstOnlinePurchase'] <= 90) &
+    (filtro_fijo['frequeny_online_last_90'] < 3)
+]
 
 
 
 
 
 
-path= r'C:\Users\ctrujils\clientes_solo_offline.csv'
-clientes_solo_offline.to_csv(path,
-          sep=';',  # Delimitador
-          decimal=',',  
-          index=False,  
-          float_format='%.2f',  # Formato para los valores decimales
-)
 
 
-path=r'C:\Users\ctrujils\order_detail_grouped_onine.parquet'
-order_detail_sorted_grouped.to_parquet(path)
+
 
 
 # Segmento de CLIENTES DORMIDOS
