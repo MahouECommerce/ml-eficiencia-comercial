@@ -5,6 +5,10 @@ import itertools as it
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
 # Cargar los datos
 
 path = r'C:\Users\ctrujils\order_detail_sorted_feat_eng.parquet'
@@ -17,7 +21,7 @@ cols_already_pdv_level = [
     'AverageSellout', 'DaysSinceLastPurchase', 'DaysSinceFirstPurchase', 
     'TotalOnlinePurchases', 'TotalOfflinePurchases', 'AverageSelloutOnline', 
     'AverageSelloutOffline', 'DaysSinceLastOfflinePurchase', 'DaysSinceLastOnlinePurchase','CumulativeAvgDaysBetweenPurchases','Frequency_online','FrequencyTotal',
-    'NumeroReferenciasUnicas','NameDistributor','Name', 'DaysSinceFirstOnlinePurchase'
+    'NumeroReferenciasUnicas','NameDistributor','Name', 'DaysSinceFirstOnlinePurchase','frequency_online_last_90','frequency_online_12UM'
 ]
 
 # Columnas que requieren agregación (a nivel de pedido)
@@ -58,7 +62,7 @@ pdvs_offline = clientes_solo_offline['PointOfSaleId'].unique().tolist()
 
 order_detail_sorted_grouped['segmento'] = ''
 
-order_detail_sorted_grouped.loc[order_detail_sorted['PointOfSaleId'].isin(pdvs_offline), 'segmento']= 'Solo_Offline'
+order_detail_sorted_grouped.loc[order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_offline), 'segmento'] = 'solo_offline'
 
 
 # Segmento de CLIENTES NUEVOS
@@ -66,18 +70,14 @@ order_detail_sorted_grouped.loc[order_detail_sorted['PointOfSaleId'].isin(pdvs_o
 #En base a lo que hemos analizado en el notebook 'Analisis_Segmentacion' nuestro periodo de observación para los pdvs nuevos son 90 días y/o más de tres compras
 
 df_online=order_detail_sorted_grouped[order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_online)]
-filtro_fijo=df_online[df_online['DaysSinceFirstOnlinePurchase'] <= 90]
-filtro_nuevos = filtro_fijo[
-    (filtro_fijo['DaysSinceFirstOnlinePurchase'] <= 90) &
-    (filtro_fijo['frequeny_online_last_90'] < 3)
-]
+df_online['PointOfSaleId'] = df_online['PointOfSaleId'].astype(str)
 
+filtro_nuevos = df_online[
+    (df_online['DaysSinceFirstOnlinePurchase'] <= 90) &
+    (df_online['frequency_online_last_90'] < 3)
+].PointOfSaleId.unique().tolist()
 
-
-
-
-
-
+order_detail_sorted_grouped.loc[order_detail_sorted_grouped['PointOfSaleId'].isin(filtro_nuevos), 'segmento']= 'nuevos'
 
 
 
@@ -98,19 +98,12 @@ clientes_dormidos = \
 
 pdvs_dormidos = clientes_dormidos['PointOfSaleId'].unique().tolist()
 
-order_detail_sorted_dormidos = order_detail_sorted_grouped[order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_dormidos)]
+order_detail_sorted_grouped.loc[
+    (order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_dormidos)) &
+    (order_detail_sorted_grouped['segmento'] == ''),
+    'segmento'
+] = 'dormidos'
 
-
-
-path= r'C:\Users\ctrujils\clientes_dormidos.csv'
-order_detail_sorted_dormidos.to_csv(path,
-          sep=';',  # Delimitador
-          decimal=',',  
-          index=False,  
-          float_format='%.2f')  # Formato para los valores decimales 
-
-order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(
-    pdvs_dormidos)]
 
 
 
@@ -122,24 +115,39 @@ print('fin')
 
 clientes_cuponeros = order_detail_sorted_grouped[order_detail_sorted_grouped['PctgCouponUsed'] >= 95 ]
 pdvs_cuponeros = clientes_cuponeros['PointOfSaleId'].unique().tolist()
-order_detail_sorted_grouped = order_detail_sorted_grouped[~order_detail_sorted_grouped['PointOfSaleId'].isin(
-    pdvs_cuponeros)]
+
+
+order_detail_sorted_grouped.loc[
+    (order_detail_sorted_grouped['PointOfSaleId'].isin(pdvs_cuponeros)) &
+    (order_detail_sorted_grouped['segmento'] == ''),
+    'segmento'
+] = 'cuponeros'
 
 
 
-path= r'C:\Users\ctrujils\clientes_cuponeros.csv'
-clientes_cuponeros.to_csv(path,
-          sep=';',  # Delimitador
-          decimal=',',  
-          index=False,  
-          float_format='%.2f')  # Formato para los valores decimales
-    
+order_detail_sorted_grouped.loc[order_detail_sorted_grouped['segmento'] == '', 'segmento'] = 'optimos'
 
 
+
+
+
+
+path=r'C:\Users\ctrujils\order_detail_grouped_nuevos_segmentos.parquet'
+order_detail_sorted_grouped.to_parquet(path)
+
+# path=r'C:\Users\ctrujils\order_detail_grouped_nuevos_segmentos.csv'
+# order_detail_sorted_grouped.to_csv(path, sep=';', decimal=',', index=False , encoding='utf-8-sig')
+
+
+
+
+## Selección de optimos para clusterizacion
+optimos_df=order_detail_sorted_grouped[order_detail_sorted_grouped['segmento']=='optimos']
 ## Seleccion de variables
-path=r'C:\Users\ctrujils\muestra_optima.csv'
-order_detail_sorted_grouped.to_csv(path)
-variables_comportamentales= order_detail_sorted_grouped [['Frequency_online', 'PctgCouponUsed', 'CouponDiscountAmt',
+
+
+
+variables_comportamentales= optimos_df [['Frequency_online', 'PctgCouponUsed', 'CouponDiscountAmt',
                 'Sellout', 'AverageSellout', 'DaysSinceLastPurchase',
                 'DaysSinceFirstPurchase', 'TotalOnlinePurchases',
                 'TotalOfflinePurchases', 
@@ -174,7 +182,7 @@ plt.title('Método del Codo para Seleccionar el Número de Clusters')
 #El método del codo indica seleccionar entre 7 y 8 clusters
 kmeans = KMeans(n_clusters=5, init= 'k-means++', random_state=42)
 kmeans.fit(scaled_features)
-order_detail_sorted_grouped['Cluster'] = kmeans.labels_
+optimos_df['Cluster'] = kmeans.labels_
 
 # Evaluar el score de Silhouette
 from sklearn.metrics import silhouette_score
@@ -192,18 +200,18 @@ variables=['Frequency_online', 'PctgCouponUsed', 'CouponDiscountAmt',
                 'CumulativeAvgDaysBetweenPurchases','FrequencyTotal', 'NumeroReferenciasUnicas', 'Digitalizacion']
 
 
-cluster_summary = order_detail_sorted_grouped.groupby('Cluster')[variables].agg(['mean', 'median', 'std']).reset_index()
+cluster_summary = optimos_df.groupby('Cluster')[variables].agg(['mean', 'median', 'std']).reset_index()
 print(cluster_summary)
 
 
 
 # Resumen de distribución de clusters por distribuidor
-cluster_por_distribuidor = order_detail_sorted_grouped.groupby(['Cluster', 'NameDistributor'])['PointOfSaleId'].count().unstack(fill_value=0)
+cluster_por_distribuidor = optimos_df.groupby(['Cluster', 'NameDistributor'])['PointOfSaleId'].count().unstack(fill_value=0)
 print(cluster_por_distribuidor)
 
 
 # Perfilado 
-perfil_cluster = order_detail_sorted_grouped.groupby('Cluster')[['FrequencyTotal', 'Sellout', 'NumeroReferenciasUnicas']].agg(['mean', 'median', 'std']).reset_index()
+perfil_cluster = optimos_df.groupby('Cluster')[['FrequencyTotal', 'Sellout', 'NumeroReferenciasUnicas']].agg(['mean', 'median', 'std']).reset_index()
 print(perfil_cluster)
 
 
@@ -231,7 +239,7 @@ clientes_espejo_list = []
 for distribuidor in distribuidores_unicos:
     
     # Filtrar los PDVs offline y los óptimos para el distribuidor actual
-    pdvs_optimos_distribuidor = order_detail_sorted_grouped[order_detail_sorted_grouped['NameDistributor'] == distribuidor]
+    pdvs_optimos_distribuidor = optimos_df[optimos_df['NameDistributor'] == distribuidor]
     pdvs_offline_distribuidor = clientes_solo_offline[clientes_solo_offline['NameDistributor'] == distribuidor]
 
     # Si no hay PDVs óptimos o offline para el distribuidor, pasar al siguiente
@@ -249,7 +257,7 @@ for distribuidor in distribuidores_unicos:
     pdvs_optimos_normalized = scaler.transform(pdvs_optimos_distribuidor_subset)
 
     # Aplicar KNN para encontrar clientes espejo
-    knn = NearestNeighbors(n_neighbors=5, metric='euclidean')
+    knn = NearestNeighbors(n_neighbors=3, metric='euclidean')
     knn.fit(pdvs_offline_normalized)
 
     # Encontrar los 5 PDVs offline más similares para cada PDV óptimo
@@ -262,8 +270,7 @@ for distribuidor in distribuidores_unicos:
         'ClienteEspejo_Offline_1': pdvs_offline_distribuidor.iloc[indices[:, 0]]['PointOfSaleId'].values,
         'ClienteEspejo_Offline_2': pdvs_offline_distribuidor.iloc[indices[:, 1]]['PointOfSaleId'].values,
         'ClienteEspejo_Offline_3': pdvs_offline_distribuidor.iloc[indices[:, 2]]['PointOfSaleId'].values,
-        'ClienteEspejo_Offline_4': pdvs_offline_distribuidor.iloc[indices[:, 3]]['PointOfSaleId'].values,
-        'ClienteEspejo_Offline_5': pdvs_offline_distribuidor.iloc[indices[:, 4]]['PointOfSaleId'].values,
+        
     
 
     })
@@ -282,270 +289,39 @@ print('fin')
 
 ###########
 
-## Probamos otro método para intentar captar mas muestra offline de todos los distribuidores. 
+# Análisis de importancia de características para variables KNN
 
-plt.figure(figsize=(10, 6))
+feature_cols = ['Sellout', 'FrequencyTotal', 'NumeroReferenciasUnicas','DaysSinceFirstPurchase' ,'DaysSinceLastPurchase']
+X = order_detail_sorted_grouped[feature_cols]
+y = order_detail_sorted_grouped['segmento']
 
-# Scatter plot
-plt.scatter(order_detail_sorted_grouped['Sellout'], order_detail_sorted_grouped['FrequencyTotal'], alpha=0.6, color='b', edgecolors='w')
+# Escalar las características
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-# Ajustes para los ejes para enfocar la región relevante
-plt.xlim(0, 50000)  #
-plt.ylim(0, 100)    # Limites
+# Entrenar el modelo Random Forest para estimar la importancia de las características
+rf = RandomForestClassifier(n_estimators=100, random_state=42)
+rf.fit(X_scaled, y)
 
-# Ajustar los ticks para intervalos más específicos
-plt.xticks(range(0, 50001, 5000))  
-plt.yticks(range(0, 101, 10))      
+# Obtener la importancia de las características
+importances = rf.feature_importances_
 
-# Añadir etiquetas y título
-plt.xlabel('Sellout')
-plt.ylabel('Frecuencia Total de Compras')
-plt.title('Relación entre Sellout y Frecuencia Total (Ajustado)')
-plt.grid(True)
+# Crear un DataFrame para la importancia de las características
+feature_importances = pd.DataFrame({'Feature': feature_cols, 'Importance': importances})
+feature_importances = feature_importances.sort_values(by='Importance', ascending=False)
 
+# # Graficar la importancia de las características
+# plt.figure(figsize=(10, 6))
+# plt.bar(feature_importances['Feature'], feature_importances['Importance'], color='skyblue')
+# plt.xlabel('Características', fontsize=14)
+# plt.ylabel('Importancia', fontsize=14)
+# plt.title('Importancia de las Características (Random Forest)', fontsize=16)
+# plt.xticks(rotation=45)
+# plt.show()
 
-plt.show()
-
+## Las variables determinantes serían  Sellout, Dias desde ultimo pedido 
 print('fin')
 
 
-# Calcular los valores de corte para FrequencyTotal y Sellout (cortes)
-
-mean_frequency_total = order_detail_sorted_grouped['FrequencyTotal'].mean()
-mean_sellout = order_detail_sorted_grouped['Sellout'].mean()
-
-
-# PDVS offline que cumplen estos criterios: 
-
-pdvs_potenciales=clientes_solo_offline[(clientes_solo_offline['FrequencyTotal']>= mean_frequency_total)& 
-                                       (clientes_solo_offline['Sellout']>= mean_sellout)]
-
-
-##### Scatter 
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(12, 6))
-
-# Scatterplot de todos los PDVs offline
-plt.scatter(clientes_solo_offline['FrequencyTotal'], clientes_solo_offline['Sellout'], alpha=0.3, label='PDVs Offline', color='gray')
-
-# Resaltar los PDVs potenciales para la migración (corte por media)
-plt.scatter(pdvs_potenciales['FrequencyTotal'], pdvs_potenciales['Sellout'], alpha=0.6, label='Potenciales (Corte Media)', color='#8B0000')
-
-# Añadir líneas de referencia para la media
-plt.axvline(x=mean_frequency_total, color='blue', linestyle='-', linewidth=1, label='Mean FrequencyTotal')
-plt.axhline(y=mean_sellout, color='blue', linestyle='-', linewidth=1, label='Mean Sellout')
-
-#
-plt.xlim(0, 500)  
-plt.ylim(0, 150000)  
-
-# Ajustar los ticks para intervalos más específicos y legibles
-plt.xticks(range(0, 501, 50)) 
-plt.yticks(range(0, 150001, 25000))  
-
-# Configurar el gráfico
-plt.xlabel('Frequency Total')
-plt.ylabel('Sellout')
-plt.title('Scatterplot de Frequency Total y Sellout para Identificar PDVs Potenciales para Migración')
-plt.legend()
-plt.grid(True)
-
-# Mostrar el gráfico
-plt.show()
-
-print('fin')
-
-
-
-
-
-
-
-
-
-
-############################################ ANALISIS DIGITALIZACION ##############################################################
-
-
-import matplotlib.pyplot as plt
-
-# Definir el punto de corte para la digitalización (>3 considerado digitalizado)
-# Distribución de Digitalización
-plt.figure(figsize=(10, 6))
-plt.hist(order_detail_sorted['Digitalizacion'], bins=20, color='skyblue', edgecolor='black')
-plt.xlabel('Nivel de Digitalización')
-plt.ylabel('Número de PDVs')
-plt.title('Distribución del Nivel de Digitalización')
-# plt.show()
-
-
-# Definir el punto de corte para la digitalización (>3 considerado digitalizado)
-punto_corte_digitalizacion = 3
-
-order_detail_sorted_grouped['DigitalizacionNivel'] = order_detail_sorted_grouped['Digitalizacion'].apply(
-    lambda x: 'Por encima' if x > punto_corte_digitalizacion else 'Por debajo'
-)
-
-digitalizacion_total = order_detail_sorted_grouped['DigitalizacionNivel'].value_counts()
-print("PDVs por nivel de digitalización (Todos juntos):")
-print(digitalizacion_total)
-
-
-##### DATOS
-# GENERAL
-#Por distribuidor
-digitalizacion_por_distribuidor = order_detail_sorted_grouped.groupby(['NameDistributor', 'DigitalizacionNivel']).size().reset_index(name='Count')
-print("PDVs por nivel de digitalización (Por distribuidor):")
-print(digitalizacion_por_distribuidor)
-
-#Por cluster
-digitalizacion_por_cluster = order_detail_sorted_grouped.groupby(['Cluster', 'DigitalizacionNivel']).size().reset_index(name='Count')
-print("PDVs por nivel de digitalización (Por cluster):")
-print(digitalizacion_por_cluster)
-
-
-
-# Media de sellout de los PDVs por nivel de digitalización
-sellout_por_digitalizacion = order_detail_sorted_grouped.groupby('DigitalizacionNivel')['Sellout'].mean().reset_index()
-print("Media de Sellout por nivel de digitalización (Todos juntos):")
-print(sellout_por_digitalizacion)
-
-
-# Media de sellout de los PDVs por nivel de digitalización y distribuidor
-sellout_por_distribuidor = order_detail_sorted_grouped.groupby(['NameDistributor', 'DigitalizacionNivel'])['Sellout'].mean().reset_index()
-print("Media de Sellout por nivel de digitalización (Por distribuidor):")
-print(sellout_por_distribuidor)
-
-
-# Media de sellout de los PDVs por nivel de digitalización y cluster
-sellout_por_cluster = order_detail_sorted_grouped.groupby(['Cluster', 'DigitalizacionNivel'])['Sellout'].mean().reset_index()
-print("Media de Sellout por nivel de digitalización (Por cluster):")
-print(sellout_por_cluster)
-
-
-#### PLOTS
-
-# # TOTAL NIVEL DIGITALIZACION
-# digitalizacion_total = order_detail_sorted_grouped['DigitalizacionNivel'].value_counts()
-
-# plt.figure(figsize=(8, 5))
-# digitalizacion_total.plot(kind='bar', color=['red', 'pink'])
-# plt.xlabel('Nivel de Digitalización')
-# plt.ylabel('Cantidad de PDVs')
-# plt.title('Cantidad de PDVs por Nivel de Digitalización (Todos Juntos)')
-# plt.xticks(rotation=0)
-# plt.show()
-
-
-
-# # DIGITALIZACION POR DISTRIBUIDOR
-
-
-# distribuidores = digitalizacion_por_distribuidor['NameDistributor'].unique()
-# num_distribuidores = len(distribuidores)
-# fig, axes = plt.subplots(nrows=(num_distribuidores + 1) // 2, ncols=2, figsize=(14, 5 * ((num_distribuidores + 1) // 2)), sharex=False)
-# axes = axes.flatten()
-
-# for i, distribuidor in enumerate(distribuidores):
-#     distribuidor_data = digitalizacion_por_distribuidor[digitalizacion_por_distribuidor['NameDistributor'] == distribuidor]
-#     axes[i].bar(distribuidor_data['DigitalizacionNivel'], distribuidor_data['Count'], color=['red', 'pink'])
-#     axes[i].set_title(f'Digitalización - Distribuidor {distribuidor}')
-#     axes[i].set_ylabel('Cantidad de PDVs')
-#     axes[i].set_xlabel('Nivel de Digitalización')
-
-#     # Rotar las etiquetas del eje X para evitar solapamiento
-#     axes[i].tick_params(axis='x', rotation=30)
-
-# for j in range(i + 1, len(axes)):
-#     fig.delaxes(axes[j])
-
-# plt.subplots_adjust(hspace=0.6, wspace=0.4)
-# plt.tight_layout()
-# plt.show()
-
-
-
-
-# # DIGITALIZACION POR CLUSTER
-# clusters = digitalizacion_por_cluster['Cluster'].unique()
-
-# num_clusters = len(clusters)
-# fig, axes = plt.subplots(nrows=(num_clusters + 1) // 2, ncols=2, figsize=(14, 5 * ((num_clusters + 1) // 2)), sharex=False)
-
-# # Aplanar los ejes para facilitar la iteración
-# axes = axes.flatten()
-# for i, cluster in enumerate(clusters):
-#     cluster_data = digitalizacion_por_cluster[digitalizacion_por_cluster['Cluster'] == cluster]
-#     axes[i].bar(cluster_data['DigitalizacionNivel'], cluster_data['Count'], color=['red', 'pink'])
-#     axes[i].set_title(f'Cantidad de PDVs por Nivel de Digitalización - Cluster {cluster}')
-#     axes[i].set_ylabel('Cantidad de PDVs')
-#     axes[i].set_xlabel('Nivel de Digitalización')
-
-#     # Rotar las etiquetas del eje X para evitar solapamiento
-#     axes[i].tick_params(axis='x', rotation=30)
-
-# for j in range(i + 1, len(axes)):
-#     fig.delaxes(axes[j])
-# plt.subplots_adjust(hspace=0.6, wspace=0.4)
-# plt.tight_layout()
-# plt.show()
-
-
-
-
-print('fin')
-
-
-# Crear el scatterplot para visualizar la relación entre Digitalización y Sellout
-plt.figure(figsize=(10, 6))
-plt.scatter(order_detail_sorted_grouped['Digitalizacion'], order_detail_sorted_grouped['PctgCouponUsed'], alpha=0.6, color='b', edgecolors='w')
-plt.xlabel('Nivel de Digitalización')
-plt.ylabel('Uso de cupones /total compras')
-plt.title('Relación entre Nivel de Digitalización y Uso de cupones para los PDVs')
-plt.grid(True)
-plt.show()
-
-
-
-print('fin')
-
-
-# distribuidores = sellout_por_distribuidor['NameDistributor'].unique()
-
-# # Crear una figura con subplots para cada distribuidor
-# fig, axes = plt.subplots(len(distribuidores), 1, figsize=(12, 6 * len(distribuidores)), sharex=True)
-
-# # Iterar sobre cada distribuidor y graficar los niveles de digitalización y la media de sellout
-# for i, distribuidor in enumerate(distribuidores):
-#     distribuidor_data = sellout_por_distribuidor[sellout_por_distribuidor['NameDistributor'] == distribuidor]
-#     axes[i].bar(distribuidor_data['DigitalizacionNivel'], distribuidor_data['Sellout'], color=['lightblue', 'orange'])
-#     axes[i].set_title(f'Media de Sellout por Nivel de Digitalización - Distribuidor {distribuidor}')
-#     axes[i].set_ylabel('Media de Sellout')
-#     axes[i].set_xlabel('Nivel de Digitalización')
-
-# # Ajustar el layout para mejorar la visualización
-# plt.tight_layout()
-# plt.show()
-
-
-# # Crear gráficos de barras para la media de sellout por nivel de digitalización - Por cluster
-# clusters = sellout_por_cluster['Cluster'].unique()
-
-# # Crear una figura con subplots para cada cluster
-# fig, axes = plt.subplots(len(clusters), 1, figsize=(12, 6 * len(clusters)), sharex=True)
-
-# # Iterar sobre cada cluster y graficar los niveles de digitalización y la media de sellout
-# for i, cluster in enumerate(clusters):
-#     cluster_data = sellout_por_cluster[sellout_por_cluster['Cluster'] == cluster]
-#     axes[i].bar(cluster_data['DigitalizacionNivel'], cluster_data['Sellout'], color=['lightgreen', 'salmon'])
-#     axes[i].set_title(f'Media de Sellout por Nivel de Digitalización - Cluster {cluster}')
-#     axes[i].set_ylabel('Media de Sellout')
-#     axes[i].set_xlabel('Nivel de Digitalización')
-
-# # Ajustar el layout para mejorar la visualización
-# plt.tight_layout()
-# plt.show()
 
 

@@ -42,6 +42,28 @@ order_detail_sorted = order_detail_sorted.merge(
 
 order_detail_sorted['OrderDate'] = pd.to_datetime(
     order_detail_sorted['OrderDate'])
+## Frequency_online_12UM
+start_date = '2023-07-11'
+end_date = '2024-07-11'
+
+# Filtrar compras online dentro del rango de fechas especificado
+filtered_online_orders = order_detail_sorted[
+    (order_detail_sorted['OrderDate'] >= start_date) &
+    (order_detail_sorted['OrderDate'] <= end_date) &
+    (order_detail_sorted['Origin'] == 'Online')
+]
+
+# Calcular la frecuencia de compras online por cada PointOfSaleId en el rango de fechas
+frequency_online_12_months = filtered_online_orders['PointOfSaleId'].value_counts().to_dict()
+
+# Agregar la frecuencia al DataFrame principal usando map
+order_detail_sorted['frequency_online_12UM'] = order_detail_sorted['PointOfSaleId'].map(frequency_online_12_months)
+
+
+
+
+
+
 
 
 order_detail_sorted['OrderDate'] = pd.to_datetime(
