@@ -48,32 +48,22 @@ def compute_returns(df, model):
 # optimos = pd.read_csv(
 #     "data/14102024_muestra_optima.csv", sep=",").PointOfSaleId
 
+### Carga de datos del modelo 
 path = r'C:\Users\ctrujils\eficiencia_promocional\0. Datos\\'
 
-# Definir los nombres de los archivos
-file_dormidos = '11102024_clientes_dormidos.csv'
-file_offline = '11102024_clientes_solo_offline.csv'
-file_cuponeros = '14102024_clientes_cuponeros_v2.csv'
-file_optimos = '14102024_muestra_optima.csv'
 file_modelo= 'df_modelo.parquet'
 pickle_modelo='modelo_general.pkl'
 
-
-# Leer los archivos utilizando la misma estructura
-dormidos = pd.read_csv(f'{path}{file_dormidos}', sep=';').PointOfSaleId
-offline = pd.read_csv(f'{path}{file_offline}', sep=';').PointOfSaleId
-cuponeros = pd.read_csv(f'{path}{file_cuponeros}', sep=';').PointOfSaleId
-optimos = pd.read_csv(f'{path}{file_optimos}', sep=',').PointOfSaleId
-
-
-
 df = pd.read_parquet(f'{path}{file_modelo}')
 df.CouponDiscountAmt.sum()
-
 modelo_path=f'{path}{pickle_modelo}'
 
 with open(modelo_path, "rb") as f:
     modelo_general = pickle.load(f)
+
+### Carga de datos de 
+
+
 
 #### DataFrame por pdv y % de cuponero
 

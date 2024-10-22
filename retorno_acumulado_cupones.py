@@ -73,7 +73,7 @@ with open(modelo_path, "rb") as f:
 
 #### DataFrame por pdv y % de cuponero
 
-df_pdv_coupon_usage = df.groupby('PointOfSaleId')['PctgCouponUsed'].mean().reset_index()
+# df_pdv_coupon_usage = df.groupby('PointOfSaleId')['PctgCouponUsed'].mean().reset_index()
 
 corte_cupon = [99, 97, 95, 93, 91, 89, 87, 85, 83, 81, 79, 77, 75, 73, 71]
 
@@ -93,12 +93,12 @@ corte_cupon = [99, 97, 95, 93, 91, 89, 87, 85, 83, 81, 79, 77, 75, 73, 71]
 #     df_grupo_rest=df[~df['PointOfSaleId'].isin(pdvs_acumulados)]
 
 
-#     # if df_grupo_acumulado.empty:
-#     #     print(f"El DataFrame del grupo acumulado está vacío para el corte {corte}%")
-#     #     continue
-#     # if df_grupo_rest.empty:
-#     #     print(f"El DataFrame del grupo restante está vacío para el corte {corte}%")
-#     #     continue
+    # if df_grupo_acumulado.empty:
+    #     print(f"El DataFrame del grupo acumulado está vacío para el corte {corte}%")
+    #     continue
+    # if df_grupo_rest.empty:
+    #     print(f"El DataFrame del grupo restante está vacío para el corte {corte}%")
+    #     continue
 
 
 #     # Entrenamos el modelo para los acumulados
@@ -174,15 +174,18 @@ resultados_df = pd.DataFrame({
 
 print('fin')
 
+resultados_df['Acumulado_Dif_Cuantiles_5%'] = resultados_df['Dif_Cuantiles_5%'].cumsum()
+resultados_df['Acumulado_Dif_Cuantiles_50%'] = resultados_df['Dif_Cuantiles_50%'].cumsum()
+resultados_df['Acumulado_Dif_Cuantiles_95%'] = resultados_df['Dif_Cuantiles_95%'].cumsum()
 
 import matplotlib.pyplot as plt
 resultados_df['Grupo'] = [f'Punto de corte {corte}%' for corte in corte_cupon ]
 plt.figure(figsize=(10, 6))
 
 # Graficar los cuantiles del 5%, 50% (mediana) y 95% para cada grupo
-plt.plot(resultados_df['Grupo'], resultados_df['Dif_Cuantiles_5%'], label='Cuantil 5%', color='#ff9896', linewidth=2)
-plt.plot(resultados_df['Grupo'], resultados_df['Dif_Cuantiles_50%'], label='Mediana (50%)', color='#d62728', linewidth=2)
-plt.plot(resultados_df['Grupo'], resultados_df['Dif_Cuantiles_95%'], label='Cuantil 95%', color='#7f7f7f', linewidth=2)
+plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_5%'], label='Cuantil 5%', color='#ff9896', linewidth=2)
+plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_50%'], label='Mediana (50%)', color='#d62728', linewidth=2)
+plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_95%'], label='Cuantil 95%', color='#7f7f7f', linewidth=2)
 
 # Título y etiquetas de los ejes
 plt.title('Diferencias Normalizadas entre Cuantiles por Grupo', fontsize=16)
