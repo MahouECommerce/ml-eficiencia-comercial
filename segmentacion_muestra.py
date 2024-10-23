@@ -113,7 +113,7 @@ print('fin')
 
 # Filtrar los clientes cuponeros: aquellos con todas sus compras online usando cupones
 
-clientes_cuponeros = order_detail_sorted_grouped[order_detail_sorted_grouped['PctgCouponUsed'] >= 95 ]
+clientes_cuponeros = order_detail_sorted_grouped[order_detail_sorted_grouped['PctgCouponUsed'] >= 75 ]
 pdvs_cuponeros = clientes_cuponeros['PointOfSaleId'].unique().tolist()
 
 
@@ -130,13 +130,14 @@ order_detail_sorted_grouped.loc[order_detail_sorted_grouped['segmento'] == '', '
 
 
 
+order_detail_sorted_grouped = order_detail_sorted_grouped[order_detail_sorted_grouped['PointOfSaleId'] != 'CLI0030230']
 
-
-path=r'C:\Users\ctrujils\order_detail_grouped_nuevos_segmentos.parquet'
-order_detail_sorted_grouped.to_parquet(path)
+# path=r'C:\Users\ctrujils\order_detail_grouped_nuevos_segmentos.parquet'
+# order_detail_sorted_grouped.to_parquet(path)
 
 # path=r'C:\Users\ctrujils\order_detail_grouped_nuevos_segmentos.csv'
 # order_detail_sorted_grouped.to_csv(path, sep=';', decimal=',', index=False , encoding='utf-8-sig')
+
 
 
 
@@ -257,7 +258,7 @@ for distribuidor in distribuidores_unicos:
     pdvs_optimos_normalized = scaler.transform(pdvs_optimos_distribuidor_subset)
 
     # Aplicar KNN para encontrar clientes espejo
-    knn = NearestNeighbors(n_neighbors=3, metric='euclidean')
+    knn = NearestNeighbors(n_neighbors=5, metric='euclidean')
     knn.fit(pdvs_offline_normalized)
 
     # Encontrar los 5 PDVs offline más similares para cada PDV óptimo
@@ -270,8 +271,8 @@ for distribuidor in distribuidores_unicos:
         'ClienteEspejo_Offline_1': pdvs_offline_distribuidor.iloc[indices[:, 0]]['PointOfSaleId'].values,
         'ClienteEspejo_Offline_2': pdvs_offline_distribuidor.iloc[indices[:, 1]]['PointOfSaleId'].values,
         'ClienteEspejo_Offline_3': pdvs_offline_distribuidor.iloc[indices[:, 2]]['PointOfSaleId'].values,
-        
-    
+        'ClienteEspejo_Offline_4': pdvs_offline_distribuidor.iloc[indices[:, 3]]['PointOfSaleId'].values,
+        'ClienteEspejo_Offline_5': pdvs_offline_distribuidor.iloc[indices[:, 4]]['PointOfSaleId'].values,
 
     })
 
