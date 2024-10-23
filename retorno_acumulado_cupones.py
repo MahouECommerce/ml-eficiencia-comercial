@@ -73,78 +73,78 @@ with open(modelo_path, "rb") as f:
 
 #### DataFrame por pdv y % de cuponero
 
-# df_pdv_coupon_usage = df.groupby('PointOfSaleId')['PctgCouponUsed'].mean().reset_index()
+df_pdv_coupon_usage = df.groupby('PointOfSaleId')['PctgCouponUsed'].mean().reset_index()
 
 corte_cupon = [99, 97, 95, 93, 91, 89, 87, 85, 83, 81, 79, 77, 75, 73, 71]
 
 
-# grupo_nombres = []
-# cupon_medio_list = []
-# cuantiles_list = []
-# diferencia_cuantiles_list = []
+grupo_nombres = []
+cupon_medio_list = []
+cuantiles_list = []
+diferencia_cuantiles_list = []
 
-# pdvs_acumulados=set()
+pdvs_acumulados=set()
 
-# for corte in corte_cupon:
-#     df_corte_actual=df_pdv_coupon_usage[df_pdv_coupon_usage['PctgCouponUsed']>=corte]
-#     pdvs_acumulados.update(df_corte_actual['PointOfSaleId'])
+for corte in corte_cupon:
+    df_corte_actual=df_pdv_coupon_usage[df_pdv_coupon_usage['PctgCouponUsed']>=corte]
+    pdvs_acumulados.update(df_corte_actual['PointOfSaleId'])
 
-#     df_grupo_acumulado=df[df['PointOfSaleId'].isin(pdvs_acumulados)]
-#     df_grupo_rest=df[~df['PointOfSaleId'].isin(pdvs_acumulados)]
-
-
-    # if df_grupo_acumulado.empty:
-    #     print(f"El DataFrame del grupo acumulado está vacío para el corte {corte}%")
-    #     continue
-    # if df_grupo_rest.empty:
-    #     print(f"El DataFrame del grupo restante está vacío para el corte {corte}%")
-    #     continue
+    df_grupo_acumulado=df[df['PointOfSaleId'].isin(pdvs_acumulados)]
+    df_grupo_rest=df[~df['PointOfSaleId'].isin(pdvs_acumulados)]
 
 
-#     # Entrenamos el modelo para los acumulados
+    if df_grupo_acumulado.empty:
+        print(f"El DataFrame del grupo acumulado está vacío para el corte {corte}%")
+        continue
+    if df_grupo_rest.empty:
+        print(f"El DataFrame del grupo restante está vacío para el corte {corte}%")
+        continue
+
+
+    # Entrenamos el modelo para los acumulados
 
   
-#     br_acumulados = BayesianRidge(fit_intercept=False)
-#     br_acumulados.fit(df_grupo_acumulado[feat_cols], df_grupo_acumulado['Sellout'])
+    br_acumulados = BayesianRidge(fit_intercept=False)
+    br_acumulados.fit(df_grupo_acumulado[feat_cols], df_grupo_acumulado['Sellout'])
 
-#     #Calcular y almacenar cupon medio 
-#     cupon_medio = df_grupo_acumulado['CouponDiscountAmt'].mean()
-#     cupon_medio_list.append(cupon_medio)
-#     grupo_nombres.append(f"Acumulados ({corte}% cupones)")
+    #Calcular y almacenar cupon medio 
+    cupon_medio = df_grupo_acumulado['CouponDiscountAmt'].mean()
+    cupon_medio_list.append(cupon_medio)
+    grupo_nombres.append(f"Acumulados ({corte}% cupones)")
     
-#     # Calcular y almacenar los retornos
-#     returns_acumulados = compute_returns(df_grupo_acumulado, br_acumulados)
-#     cuantiles_acumulados = np.quantile(np.array(returns_acumulados), [0.05, 0.5, 0.95])
-#     diferencia_cuantiles_list.append(cuantiles_acumulados[1] - cuantiles_acumulados[0])
+    # Calcular y almacenar los retornos
+    returns_acumulados = compute_returns(df_grupo_acumulado, br_acumulados)
+    cuantiles_acumulados = np.quantile(np.array(returns_acumulados), [0.05, 0.5, 0.95])
+    diferencia_cuantiles_list.append(cuantiles_acumulados[1] - cuantiles_acumulados[0])
 
-#     # Entrenar el modelo para el resto 
+    # Entrenar el modelo para el resto 
     
-#     br_resto = BayesianRidge(fit_intercept=False)
-#     br_resto.fit(df_grupo_rest[feat_cols], df_grupo_rest['Sellout'])
+    br_resto = BayesianRidge(fit_intercept=False)
+    br_resto.fit(df_grupo_rest[feat_cols], df_grupo_rest['Sellout'])
     
-#     returns_resto = compute_returns(df_grupo_rest, br_resto)
-#     cuantiles_resto = np.quantile(np.array(returns_resto), [0.05, 0.5, 0.95])
+    returns_resto = compute_returns(df_grupo_rest, br_resto)
+    cuantiles_resto = np.quantile(np.array(returns_resto), [0.05, 0.5, 0.95])
 
-#     diferencia_cuantiles = cuantiles_acumulados - cuantiles_resto
-#     diferencia_cuantiles_list.append(diferencia_cuantiles)
+    diferencia_cuantiles = cuantiles_acumulados - cuantiles_resto
+    diferencia_cuantiles_list.append(diferencia_cuantiles)
 
-# with open('resultados_acumulados.pkl', "wb") as file:
-#         resultados = {
-#             'grupo_nombres': grupo_nombres,
-#             'cupon_medio_list': cupon_medio_list,
-#             'cuantiles_list': cuantiles_list,
-#             'diferencia_cuantiles_list': diferencia_cuantiles_list
-#         }
-#         pickle.dump(resultados, file)
-# print("Resultados guardados en el archivo pickle.")  
+with open('resultados_acumulados.pkl', "wb") as file:
+        resultados = {
+            'grupo_nombres': grupo_nombres,
+            'cupon_medio_list': cupon_medio_list,
+            'cuantiles_list': cuantiles_list,
+            'diferencia_cuantiles_list': diferencia_cuantiles_list
+        }
+        pickle.dump(resultados, file)
+print("Resultados guardados en el archivo pickle.")  
 
-with open('resultados_acumulados.pkl', "rb") as file:
-    resultados = pickle.load(file)
-    grupo_nombres = resultados['grupo_nombres']
-    cupon_medio_list = resultados['cupon_medio_list']
-    cuantiles_list = resultados['cuantiles_list']
-    diferencia_cuantiles_list = resultados['diferencia_cuantiles_list']
-    print("Resultados cargados del archivo pickle.")
+# with open('resultados_acumulados.pkl', "rb") as file:
+#     resultados = pickle.load(file)
+#     grupo_nombres = resultados['grupo_nombres']
+#     cupon_medio_list = resultados['cupon_medio_list']
+#     cuantiles_list = resultados['cuantiles_list']
+#     diferencia_cuantiles_list = resultados['diferencia_cuantiles_list']
+#     print("Resultados cargados del archivo pickle.")
 
 diferencia_cuantiles_arr = np.array([np.array(dif) for dif in diferencia_cuantiles_list if isinstance(dif, np.ndarray)])
 
@@ -183,9 +183,9 @@ resultados_df['Grupo'] = [f'Punto de corte {corte}%' for corte in corte_cupon ]
 plt.figure(figsize=(10, 6))
 
 # Graficar los cuantiles del 5%, 50% (mediana) y 95% para cada grupo
-plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_5%'], label='Cuantil 5%', color='#ff9896', linewidth=2)
+# plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_5%'], label='Cuantil 5%', color='#ff9896', linewidth=2)
 plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_50%'], label='Mediana (50%)', color='#d62728', linewidth=2)
-plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_95%'], label='Cuantil 95%', color='#7f7f7f', linewidth=2)
+# plt.plot(resultados_df['Grupo'], resultados_df['Acumulado_Dif_Cuantiles_95%'], label='Cuantil 95%', color='#7f7f7f', linewidth=2)
 
 # Título y etiquetas de los ejes
 plt.title('Diferencias Normalizadas entre Cuantiles por Grupo', fontsize=16)
@@ -205,6 +205,53 @@ plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
 
 # Mostrar el gráfico
-plt.show()
+# plt.show()
 print('fin')
 
+
+
+
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+
+
+# # Crear una lista con los nombres de los grupos que queremos analizar
+# grupos_interes = ['Acumulados (95% cupones)', 'Acumulados (80% cupones)', 'Acumulados (75% cupones)']
+
+
+# scaler = MinMaxScaler(feature_range=(0, 1))
+
+# # Iterar sobre cada punto de corte y graficar la distribución para returns acumulados y resto
+# for corte in grupos_interes:
+#     # Filtrar los datos de los acumulados y resto
+#     df_grupo_acumulado = df[df['PointOfSaleId'].isin(resultados[f'{corte}'])]
+#     df_grupo_rest = df[~df['PointOfSaleId'].isin(resultados[f'acumulados_{corte}'])]
+    
+#     # Escalar los returns acumulados y los returns del resto
+#     returns_acumulados_scaled = scaler.fit_transform(df_grupo_acumulado['returns'].values.reshape(0, 1)).flatten()
+#     returns_resto_scaled = scaler.fit_transform(df_grupo_rest['returns'].values.reshape(0, 1)).flatten()
+
+#     # Crear una figura para cada punto de corte
+#     plt.figure(figsize=(10, 6))
+
+#     # Graficar los histogramas para los datos escalados
+#     plt.hist(returns_acumulados_scaled, bins=30, alpha=0.6, label='Returns Acumulados', color='#ff7f0e', edgecolor='black')
+#     plt.hist(returns_resto_scaled, bins=30, alpha=0.6, label='Returns Resto', color='#1f77b4', edgecolor='black')
+
+#     # Añadir título y etiquetas a cada gráfica
+#     plt.title(f'Distribución de Returns para Corte {corte}%', fontsize=16)
+#     plt.xlabel('Returns Normalizados', fontsize=14)
+#     plt.ylabel('Frecuencia', fontsize=14)
+
+#     # Añadir una leyenda para identificar las distribuciones
+#     plt.legend(fontsize=12)
+
+#     # Mostrar la cuadrícula para mejor lectura del gráfico
+#     plt.grid(True, linestyle='--', alpha=0.7)
+
+#     # Ajustar el gráfico para evitar sobreposiciones
+#     plt.tight_layout()
+
+#     # Mostrar el gráfico
+#     plt.show()
